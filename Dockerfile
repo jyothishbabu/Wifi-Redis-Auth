@@ -6,7 +6,7 @@ COPY raddb/mods-available/eap               /etc/raddb/mods-available/eap
 COPY raddb/mods-available/blocked_devices   /etc/raddb/mods-available/blocked_devices
 COPY raddb/mods-available/panel_authlog      /etc/raddb/mods-available/panel_authlog
 COPY raddb/sites-available/check-eap-tls    /etc/raddb/sites-available/check-eap-tls
-COPY radius/run.sh                          /usr/local/bin/radius-run.sh
+COPY redis/run.sh                          /usr/local/bin/redis-run.sh
 
 RUN ln -sf ../mods-available/blocked_devices /etc/raddb/mods-enabled/blocked_devices \
  && ln -sf ../mods-available/panel_authlog    /etc/raddb/mods-enabled/panel_authlog \
@@ -17,6 +17,6 @@ RUN ln -sf ../mods-available/blocked_devices /etc/raddb/mods-enabled/blocked_dev
  && grep -q panel_authlog_accept /etc/raddb/sites-available/default \
  && grep -q panel_authlog_reject /etc/raddb/sites-available/default \
  && sed -i -E 's/^([[:space:]]*)auth = no/\1auth = yes/' /etc/raddb/radiusd.conf \
- && mkdir -p /etc/raddb/panel-dyn /var/log/wifi-radius /var/run/wifi-radius-control
+ && mkdir -p /etc/raddb/panel-dyn /var/log/wifi-redis /var/run/wifi-redis-control
 
-ENTRYPOINT ["/usr/local/bin/radius-run.sh"]
+ENTRYPOINT ["/usr/local/bin/redis-run.sh"]

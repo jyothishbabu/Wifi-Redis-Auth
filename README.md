@@ -1,82 +1,163 @@
-# Certificate-based Wi-Fi (EAP-TLS) with a web admin panel
+# WiFi Redis Authenticator
+
+Certificate-only Wi-Fi (WPA2-Enterprise, EAP-TLS) for Aruba access points, with a web admin panel.
+Laptops join with their own certificate, with no password and no MAC filtering. Everything is configured in the panel.
 
 ```
-Intune laptop ── SSID ──► Aruba AP / Virtual Controller ──(UDP 1812, office public IP)──► AWS EC2
- (device cert from                                                                        ├─ Redis server (FreeRADIUS, EAP-TLS only)
-  Intune Cloud PKI)                                                                       └─ Admin panel  https://<ip>:8443
+Laptop (certificate) ── SSID ──► Aruba AP / Virtual Controller ──UDP 1812──► AWS EC2 (Docker)
+                                                                             ├─ redis: FreeRADIUS, EAP-TLS only
+                                                                             └─ panel: https://<Elastic-IP>:8443
 ```
 
-Laptops join only with a certificate from Intune Cloud PKI. Passwords and MAC filtering aren't used.
-**Everything is configured in the admin panel.** There is no `.env` and no config file to edit.
-
-## Deploy (EC2)
-
-1. **AWS:** Amazon Linux 2023, t3.small, Elastic IP, IAM role with `AmazonSSMManagedInstanceCore`.
-   Security Group inbound from **each office public IP /32 only**: UDP 1812, UDP 1813, TCP 8443. No port 22.
-2. **On the server** (Session Manager):
-   ```bash
-   sudo dnf install -y docker git && sudo systemctl enable --now docker
-   sudo mkdir -p /usr/local/lib/docker/cli-plugins && cd /usr/local/lib/docker/cli-plugins
-   sudo curl -sSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o docker-compose
-   V=$(curl -s https://api.github.com/repos/docker/buildx/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-   sudo curl -sSL https://github.com/docker/buildx/releases/download/$V/buildx-$V.linux-amd64 -o docker-buildx
-   sudo chmod +x docker-compose docker-buildx
-   sudo git clone <this repo> /opt/wifi-radius && cd /opt/wifi-radius
-   sudo docker compose up -d --build
-   sudo docker compose logs panel | grep "SETUP CODE"
-   ```
-3. From an office, open **https://&lt;Elastic-IP&gt;:8443**. Accept the one-time certificate warning, enter the setup code, then fill in the SSID, admin account and first office.
-
-## Then, in the panel
-
-| Page | What to do |
+| Part | What it does |
 |---|---|
-| **Offices** | Add each office's public IPs. Each office gets its own generated secret. **Aruba config** shows the ready-to-paste CLI |
-| **Devices → Add laptop** | Gives that laptop its own certificate. Send the user the **one-time install link**, or download the **installer** yourself |
-| **Certificates** | Server certificates and the Redis root. Optional: upload Intune Cloud PKI CAs |
-| **Dashboard** | Setup checklist, status, logins in the last 24h, certificate expiry |
-| **Logins / Devices** | Who connected or was rejected and why. **Remove** or **Block** a laptop with one click |
-| **Settings** | SSID, admin account, extra admin IPs, verbose logging, **Intune connection** (read-only: user, model, serial, OS, compliance per laptop) |
+| `redis` container | FreeRADIUS. It answers only the office IPs and accepts only laptop certificates from trusted CAs that aren't on the block list |
+| `panel` container | Admin web app. Setup, offices, laptops and certificates, Intune details, logins, block list, logs |
+| `data/` on the server | All settings, keys, certificates and logs. **Back this folder up** |
 
-### Installing a laptop (same idea on Windows and Mac)
-- **Windows:** open `Install-WiFi-<laptop>.cmd` and click **Yes** on the admin prompt. It installs the root, the certificate and the Wi-Fi network for the whole computer.
-- **Mac:** open `WiFi-<laptop>.mobileconfig`, then go to System Settings → General → Device Management → **Install**.
-- iPhone and iPad use the same `.mobileconfig`.
+---
 
-Install links work once, expire after 7 days, and only open from office IPs. Certificates last 1 year; to renew, use "Install link / file" again.
+## 1. Deploy (once)
 
-Every change is checked with `radiusd -C` before it goes live. If the check fails, the running config stays and the error shows on the dashboard.
+**AWS**
+- **EC2:** Amazon Linux 2023, t4g.small (ARM) or t3.small (x86), 20 GB.
+- **IAM role:** `AmazonSSMManagedInstanceCore`. Connect with Session Manager; no SSH and no port 22.
+- **Elastic IP:** associate one with the instance.
+- **Security Group inbound:** from **every office public IP /32** only:
 
-## Optional: Intune instead of install links
+  | Port | Purpose |
+  |---|---|
+  | UDP 1812 | Wi-Fi logins |
+  | UDP 1813 | Accounting |
+  | TCP 8443 | Admin panel |
 
-1. **Trusted certificate:** `Redis-Root-CA.cer` (from the Certificates page)
-2. **Trusted certificate:** the Cloud PKI root
-3. **SCEP certificate:**
-   - Device type, subject `CN={{DeviceName}}`, SAN DNS `{{DeviceName}}`
-   - TPM, RSA 2048, EKU Client Authentication
-   - Root = profile 2, URL = the Cloud PKI SCEP URI
-4. **Wi-Fi (Enterprise):**
-   - Your SSID, EAP-TLS
-   - Server name = the Redis server name on the Certificates page
-   - Server root = profile 1, client certificate = profile 3
-   - Machine authentication
+**Server** (Session Manager)
+```bash
+sudo dnf install -y docker git && sudo systemctl enable --now docker
+sudo mkdir -p /usr/local/lib/docker/cli-plugins && cd /usr/local/lib/docker/cli-plugins
+A=$(uname -m | sed 's/aarch64/arm64/; s/x86_64/amd64/')
+sudo curl -sSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m) -o docker-compose
+V=$(curl -s https://api.github.com/repos/docker/buildx/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+sudo curl -sSL https://github.com/docker/buildx/releases/download/$V/buildx-$V.linux-$A -o docker-buildx
+sudo chmod +x docker-compose docker-buildx
 
-## Security
+# Private repo: add a read-only deploy key first (GitHub → repo → Settings → Deploy keys)
+sudo git clone git@github.com:jyothishbabu/Wifi-Redis-Auth.git /opt/wifi-redis && cd /opt/wifi-redis
+sudo docker compose up -d --build
+sudo docker compose logs panel | grep "SETUP CODE"
+```
+
+## 2. First-time setup (panel)
+
+From an office, open **https://&lt;Elastic-IP&gt;:8443**. The certificate warning appears only this once. Enter the setup code, then:
+- **SSID name**, exactly as on Aruba (it's case-sensitive)
+- **Admin username and password**
+- **First office:** its name and public IPs (comma-separated if there are several)
+- **Redis server name:** keep the default. Laptops check it; it needs no DNS
+- **Panel address:** the Elastic IP
+
+The panel restarts with its own certificate. Then follow the **Dashboard → Setup checklist**.
+
+## 3. Aruba (each office)
+
+Panel → **Offices** → add all offices and **all** their public IPs → **Aruba config** gives you ready-to-paste CLI.
+Check these three lines on the virtual controller:
+
+| Setting | Must be | If it's wrong |
+|---|---|---|
+| `wlan auth-server … ip` | The **Elastic IP**, not a hostname | "Authentication server is unresponsive" |
+| `wlan auth-server … key` | The office secret from the panel | "Unresponsive" (the server silently drops the request) |
+| `wlan ssid-profile … opmode` | `wpa2-aes`, not `wpa-aes` | Windows: "The specific network is not available" |
+
+## 4. Put certificates on laptops (two ways)
+
+**A. Intune: automatic for every managed laptop** (needs the Intune Suite or Cloud PKI licence)
+1. Intune → Tenant administration → **Cloud PKI**: create a Root CA, then an Issuing CA, both with EKU **Client Authentication**. Download both `.cer` files and copy the Issuing CA's **SCEP URI**.
+2. Panel → **Certificates**: upload both `.cer` files, and download **Redis-Root-CA.cer**.
+3. Intune → Devices → Windows → Configuration. Create these profiles and assign all of them to one **device** group:
+
+   | Profile | Key settings |
+   |---|---|
+   | Trusted certificate | `Redis-Root-CA.cer` → Computer store **Root** |
+   | Trusted certificate | Cloud PKI root → Computer store **Root** |
+   | Trusted certificate | Cloud PKI issuing → Computer store **Intermediate** |
+   | SCEP certificate | **Device** · `CN={{DeviceName}}` (`{{AAD_Device_ID}}` also works) · TPM KSP if present · EKU Client Authentication · Root = the Cloud PKI root profile · URL = the SCEP URI |
+   | Wi-Fi (Enterprise) | Your SSID · WPA/WPA2-Enterprise · **Machine** · EAP-TLS · Server name = the panel's server name · Server root = `Redis-Root-CA.cer` · Client certificate = the SCEP profile |
+
+4. Pilot 2–3 laptops: all 5 profiles **Succeeded**, then **ACCEPT** on the panel's Logins page. Then add everyone.
+
+**B. Panel: for laptops not in Intune** (Windows or Mac)
+Panel → **Devices → Add laptop**, then either:
+- Send the **one-time install link**. It works once, lasts 7 days, and opens only from office IPs. Or:
+- Download the **installer** yourself.
+
+| Windows | Mac / iPhone |
+|---|---|
+| Open `Install-WiFi-<name>.cmd` → **Yes** on the admin prompt → Done | Open `WiFi-<name>.mobileconfig` → System Settings → Device Management → **Install** |
+
+Each installer adds the root, the laptop's own certificate (valid 1 year) and the Wi-Fi network. Nothing to type.
+
+**Optional:** Settings → **Intune** (read-only Microsoft Graph) shows each laptop's user, model, serial, OS and compliance, and flags laptops that are non-compliant or not in Intune.
+
+## 5. Go-live checklist
+
+- [ ] Dashboard: every **Setup checklist** item is done, and the status shows **Redis running**
+- [ ] Every office and **all** its public IPs are on the Offices page **and** in the Security Group
+- [ ] Each office's Aruba: Elastic IP, current key, `opmode wpa2-aes`
+- [ ] Office secrets rotated (Offices → Generate → Save, then re-paste on Aruba) if one was ever shared
+- [ ] Pilot laptops show **ACCEPT** on Logins (Intune and/or installer)
+- [ ] **No TEST CA** under Certificates → Trusted laptop CAs
+- [ ] Intune connected (optional), with a reminder set before its client secret expires
+- [ ] `data/` backed up, and the GitHub repo is **private**
+- [ ] Admin password stored in your password manager
+
+## 6. Daily operations
+
+| Task | How |
+|---|---|
+| New laptop | Intune: nothing to do. Otherwise: Devices → Add laptop |
+| Lost, stolen or leaving | Devices → **Block** or **Remove**. Takes effect in seconds. Also retire or wipe it in Intune |
+| Who connected | **Logins** (filter, export CSV). Rejected attempts show the reason |
+| Office IP changed | Security Group **first**, then Offices |
+| Troubleshoot one laptop | Settings → Verbose logging → Logs & config → Redis server log. Turn it off afterwards |
+| Update the software | `cd /opt/wifi-redis && sudo git pull && sudo docker compose up -d --build --remove-orphans` |
+| Forgot the admin password | `cd /opt/wifi-redis && sudo docker compose exec panel python3 reset_admin.py` |
+| Back up | `sudo tar czf wifi-backup-$(date +%F).tgz -C /opt/wifi-redis data`. Store it encrypted; it contains private keys |
+| Restore on a new server | Deploy (step 1), stop the stack, put `data/` back, `sudo docker compose up -d`. Laptops keep working, because the same CAs and keys come back |
+
+## 7. Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Windows asks for a username and password | No Wi-Fi profile on the laptop, or the SSID name or security doesn't match | Install the profile (Intune or installer). Check the SSID spelling and `opmode wpa2-aes` |
+| "The specific network is not available" | Aruba broadcasts WPA, the profile expects WPA2 | Aruba `opmode wpa2-aes` |
+| "Authentication server is unresponsive" | Requests don't reach Redis, or are ignored | Aruba `ip` = Elastic IP; key matches; office IP on the Offices page and in the Security Group. On the server: `sudo tcpdump -ni any udp port 1812` |
+| Logins: REJECT `unable to get local issuer` / `unknown CA` | The laptop's certificate CA isn't trusted | Certificates → upload the Cloud PKI root **and** issuing CA |
+| Logins: REJECT `TLS Alert … unknown CA` | The **laptop** doesn't trust the server | Intune Wi-Fi profile: server name and `Redis-Root-CA.cer` must match the panel |
+| Logins: REJECT `is blocked` | The laptop is on the block list | Devices → Unblock |
+| Dashboard: Redis **waiting** | No trusted laptop CA yet, or a config error | Add a laptop or upload the Intune CAs. The error is shown under the status bar |
+| Device shows as a GUID | The SCEP subject uses a device ID | Connect Intune in Settings. The panel then shows the real name |
+
+## 8. Security
 
 | Layer | What it stops |
 |---|---|
 | Security Group: office IPs only | Everyone else never reaches the server |
-| Per-office Redis clients and secrets, Message-Authenticator required | Forged or foreign Redis requests (BlastRADIUS) |
-| EAP-TLS only, laptop certificate must chain to the uploaded CAs | Personal devices, stolen passwords, rogue certificates |
-| Laptop checks the Redis server certificate and name | Fake access points |
-| Block list | Lost or stolen laptops |
-| Panel: HTTPS, its own office-IP check, hashed password, lockout after 5 failures, setup code, lockout guard | Panel takeover |
+| Per-office clients and secrets, Message-Authenticator required | Forged or foreign requests (BlastRADIUS) |
+| EAP-TLS only; certificate must chain to a trusted CA and not be blocked | Personal devices, stolen passwords, rogue certificates |
+| Laptop pins the server name and root | Fake access points |
+| Panel: HTTPS, its own office-IP check, hashed password, login lockout, setup code, lockout guard, audit log | Panel takeover |
+| Laptop private keys are never stored on the server; Intune keys stay in the TPM | Key theft from the server |
 
-## Operations
+## 9. Upgrading an install from before the Redis rename
 
-| Task | How |
-|---|---|
-| Back up | Copy `/opt/wifi-radius/data/panel/`. It holds all settings, keys and the block list |
-| Update the code | `cd /opt/wifi-radius && sudo git pull && sudo docker compose up -d --build --remove-orphans` |
-| Office IP changed | Update the Security Group **first**, then the Offices page |
-| Forgot the admin password | `cd /opt/wifi-radius && sudo docker compose exec panel python3 reset_admin.py` prints a new one |
+Earlier installs live in `/opt/wifi-radius` and use the old repository name. To move one (Wi-Fi stops for about a minute):
+```bash
+cd /opt/wifi-radius && sudo docker compose down
+cd /opt && sudo mv wifi-radius wifi-redis && cd /opt/wifi-redis
+sudo git remote set-url origin git@github.com:jyothishbabu/Wifi-Redis-Auth.git
+sudo git pull
+sudo docker compose up -d --build --remove-orphans
+sudo docker compose ps          # wifi-redis + wifi-redis-panel running
+```
+All settings, laptops and certificates are kept in `data/`, which moves with the folder. The GitHub deploy key keeps working after a repository rename.

@@ -13,7 +13,7 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 k = ec.generate_private_key(ec.SECP256R1())
-n = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "wifi-radius-panel-setup")])
+n = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "wifi-redis-panel-setup")])
 now = dt.datetime.now(dt.timezone.utc)
 c = (x509.CertificateBuilder().subject_name(n).issuer_name(n).public_key(k.public_key())
      .serial_number(x509.random_serial_number()).not_valid_before(now)

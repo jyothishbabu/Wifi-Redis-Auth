@@ -13,13 +13,11 @@ import io
 import ipaddress
 import json
 import os
-import plistlib
 import re
 import secrets
 import signal
 import threading
 import time
-import uuid
 from functools import wraps
 
 from installers import mac_profile, windows_installer
@@ -1311,7 +1309,7 @@ def config():
     masked = re.sub(r'secret = "[^"]*"', 'secret = "********"', render_clients(get_settings()))
     return render_template(
         "config.html", clients=masked, blocked_file=render_blocked(get_blocked()), status=server_status(),
-        radius_log=tail(f"{LOG_DIR}/radius.log", 300),
+        radius_log=tail(f"{LOG_DIR}/redis.log", 300),
         audit_log=[l.split("\t") for l in reversed(tail(AUDIT, 200))])
 
 

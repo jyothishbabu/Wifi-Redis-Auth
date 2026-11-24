@@ -1,10 +1,8 @@
-.env
-certs/server/
-certs/private-ca/
-certs/client-ca.pem
-certs/test-clients/
-certs/panel/
+# Runtime data written by the panel (settings, keys, certificates, logs). Never commit.
 data/
+# Local secrets and certificate files from earlier versions. Never commit.
+.env
+certs/
+intune/
+# OS noise
 .DS_Store
-intune/*.cer
-certs/trusted-client-cas/

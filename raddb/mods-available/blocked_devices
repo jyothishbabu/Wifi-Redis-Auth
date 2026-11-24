@@ -1,4 +1,4 @@
-# Looks up the certificate Common Name (= Intune device name) in the block list
+# Looks up the certificate Common Name (device name or device ID) in the block list
 # maintained by the admin panel (data/config/blocked-devices).
 files blocked_devices {
 	filename = ${confdir}/panel-dyn/blocked-devices

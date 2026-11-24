@@ -1,5 +1,5 @@
 # Runs after FreeRADIUS has validated the client certificate chain.
-# Reject devices listed in mods-config/files/blocked-devices, accept the rest.
+# Reject devices on the panel block list (data/config/blocked-devices), accept the rest.
 server check-eap-tls {
 	authorize {
 		blocked_devices
