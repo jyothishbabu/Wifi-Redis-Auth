@@ -100,7 +100,7 @@ def gen_secret():
 # ================================================================ settings
 DEFAULTS = {"configured": False, "ssid": "", "admin": {"user": "", "hash": ""}, "offices": [],
             "extra_ips": [], "debug": False, "server_name": "radius.wifi.internal", "panel_host": "",
-            "intune": {}, "app_name": "WiFi RADIUS Authenticator"}
+            "intune": {}, "app_name": "WiFi Redis Authenticator"}
 
 
 def get_settings():
@@ -532,7 +532,7 @@ def inject():
         session["csrf"] = secrets.token_urlsafe(24)
     st = get_settings()
     return {"csrf": session["csrf"], "user": session.get("user"), "ssid": st["ssid"] or "Wi-Fi",
-            "app_name": st["app_name"] or "WiFi RADIUS Authenticator",
+            "app_name": st["app_name"] or "WiFi Redis Authenticator",
             "intune": INTUNE.lookup, "intune_on": INTUNE.enabled()}
 
 
@@ -1180,7 +1180,7 @@ def settings_page():
 @login_required
 def save_general():
     ssid = request.form.get("ssid", "").strip()
-    app_name = " ".join(request.form.get("app_name", "").split())[:40] or "WiFi RADIUS Authenticator"
+    app_name = " ".join(request.form.get("app_name", "").split())[:40] or "WiFi Redis Authenticator"
     extra = request.form.get("extra_ips", "").replace(",", " ").split()
     debug = request.form.get("debug") == "on"
     errors = []
