@@ -61,4 +61,36 @@
     <button>Re-issue and restart panel</button>
   </form>
 </div>
+
+<div class="card">
+  <h2>4. Test a laptop before Intune</h2>
+  <p class="muted">Creates a 30-day certificate for one laptop, signed by a separate TEST CA that RADIUS trusts while it exists.
+    Install it by hand (steps below), connect, and check the Logins page. <b>Remove the test CA before go-live.</b></p>
+  <form method="post" action="{{ url_for('issue_test') }}" class="filters">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="device" value="TEST-LAPTOP" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}">
+    <input name="password" type="password" minlength="8" required placeholder="Password for the .pfx file" autocomplete="new-password">
+    <button>Download test .pfx</button>
+  </form>
+  {% if test_active %}
+  <form method="post" action="{{ url_for('remove_test') }}" data-confirm="Remove the test CA? Every test certificate stops working.">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">Remove test CA (do this before go-live)</button></form>
+  {% endif %}
+  <details>
+    <summary>How to set up a Windows laptop by hand</summary>
+    <ol>
+      <li>Download <b>RADIUS-Root-CA.cer</b> (section 2) and the test <b>.pfx</b> above, and copy both to the laptop.</li>
+      <li>Double-click <b>RADIUS-Root-CA.cer</b> → Install Certificate → <b>Local Machine</b> → Place in <b>Trusted Root Certification Authorities</b>.</li>
+      <li>Double-click the <b>.pfx</b> → <b>Current User</b> → enter its password → Automatically select the store.</li>
+      <li>Control Panel → Network and Sharing Center → Set up a new connection → <b>Manually connect to a wireless network</b>:
+        Network name <b>{{ ssid }}</b>, Security <b>WPA2-Enterprise</b>, Encryption <b>AES</b> → Next → <b>Change connection settings</b>.</li>
+      <li>Security tab → method <b>Microsoft: Smart Card or other certificate</b> → Settings:
+        <b>Use a certificate on this computer</b>; tick <b>Verify the server's identity</b>; Connect to these servers: <b class="mono">{{ s.server_name }}</b>;
+        Trusted Root: tick <b>{{ root.subject if root else 'the RADIUS root' }}</b> → OK.</li>
+      <li>Advanced settings → 802.1X → tick Specify authentication mode → <b>User authentication</b> → OK.</li>
+      <li>Connect to {{ ssid }}. If Windows asks which certificate, pick the test one. It must not ask for a password.</li>
+    </ol>
+    <p class="muted">Before installing Intune profiles on this laptop later, delete this manual Wi-Fi network and the test certificate (certmgr.msc → Personal).</p>
+  </details>
+</div>
 {% endblock %}

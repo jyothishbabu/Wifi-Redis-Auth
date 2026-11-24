@@ -22,6 +22,7 @@ from functools import wraps
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from flask import (Flask, Response, abort, flash, jsonify, redirect,
                    render_template, request, session, url_for)
@@ -31,6 +32,7 @@ DATA = os.environ.get("PANEL_DATA", "/data")
 P_DIR, CFG_DIR = f"{DATA}/panel", f"{DATA}/config"
 LOG_DIR, CTL_DIR = f"{DATA}/logs", f"{DATA}/control"
 CA_DIR, TLS_DIR, TRUST_DIR = f"{P_DIR}/ca", f"{P_DIR}/tls", f"{P_DIR}/trusted"
+TEST_DIR = f"{P_DIR}/testca"
 SETTINGS, BLOCKED, AUDIT = f"{P_DIR}/settings.json", f"{P_DIR}/blocked.json", f"{P_DIR}/audit.log"
 SETUP_CODE = f"{P_DIR}/setup-code"
 
@@ -47,7 +49,7 @@ MAX_UPLOAD = 256 * 1024
 
 lock = threading.Lock()
 fails = {}  # ip -> [count, first_fail_ts]
-for d in (P_DIR, CFG_DIR, CTL_DIR, CA_DIR, TLS_DIR, TRUST_DIR):
+for d in (P_DIR, CFG_DIR, CTL_DIR, CA_DIR, TLS_DIR, TRUST_DIR, TEST_DIR):
     os.makedirs(d, exist_ok=True)
 
 
@@ -220,6 +222,63 @@ def generate_panel_cert(host):
     atomic_write(f"{TLS_DIR}/panel.pem", pem_cert(c) + (pem_cert(ca_cert) if ca_cert else b""))
 
 
+TEST_CA_CN = "TEST Wi-Fi Laptop CA (remove before go-live)"
+
+
+def test_ca():
+    """CA used only for manual test certificates. It is trusted while it exists."""
+    c, k = read_bytes(f"{TEST_DIR}/ca.pem"), read_bytes(f"{TEST_DIR}/ca.key")
+    if c and k:
+        return x509.load_pem_x509_certificate(c), serialization.load_pem_private_key(k, None)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    n = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, TEST_CA_CN)])
+    now = utcnow()
+    cert = (x509.CertificateBuilder().subject_name(n).issuer_name(n).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - dt.timedelta(minutes=5)).not_valid_after(now + dt.timedelta(days=90))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+            .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+            .sign(key, hashes.SHA256()))
+    atomic_write(f"{TEST_DIR}/ca.key", pem_key(key), 0o600)
+    atomic_write(f"{TEST_DIR}/ca.pem", pem_cert(cert))
+    atomic_write(f"{TRUST_DIR}/{fingerprint(cert)}.pem", pem_cert(cert))
+    return cert, key
+
+
+def issue_test_client(device, password):
+    """30-day client certificate for one test laptop, as a Windows-compatible .pfx."""
+    ca_cert, ca_key = test_ca()
+    k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = utcnow()
+    c = (x509.CertificateBuilder()
+         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, device)]))
+         .issuer_name(ca_cert.subject).public_key(k.public_key()).serial_number(x509.random_serial_number())
+         .not_valid_before(now - dt.timedelta(minutes=5)).not_valid_after(now + dt.timedelta(days=30))
+         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+         .add_extension(x509.KeyUsage(True, False, True, False, False, False, False, False, False), critical=True)
+         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+         .add_extension(x509.SubjectAlternativeName([x509.DNSName(device)]), critical=False)
+         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()), critical=False)
+         .sign(ca_key, hashes.SHA256()))
+    # Legacy 3DES/SHA1 PKCS#12 so every Windows and macOS version can import it.
+    enc = (serialization.PrivateFormat.PKCS12.encryption_builder().kdf_rounds(50000)
+           .key_cert_algorithm(pkcs12.PBES.PBESv1SHA1And3KeyTripleDESCBC).hmac_hash(hashes.SHA1())
+           .build(password.encode()))
+    return pkcs12.serialize_key_and_certificates(device.encode(), k, c, [ca_cert], enc)
+
+
+def remove_test_ca():
+    c = read_bytes(f"{TEST_DIR}/ca.pem")
+    if c:
+        fp = fingerprint(x509.load_pem_x509_certificate(c))
+        if os.path.exists(f"{TRUST_DIR}/{fp}.pem"):
+            os.remove(f"{TRUST_DIR}/{fp}.pem")
+    for f in ("ca.pem", "ca.key"):
+        if os.path.exists(f"{TEST_DIR}/{f}"):
+            os.remove(f"{TEST_DIR}/{f}")
+
+
 def parse_certs(data):
     """PEM (one or many) or DER bytes -> list of certificates."""
     try:
@@ -356,7 +415,8 @@ def checklist(s):
     public = [ip for o in s["offices"] for ip in o["ips"] if not ipaddress.ip_network(ip, strict=False).is_private]
     return [
         ("RADIUS server certificate", bool(server_chain()), "Certificates page: generate or import it."),
-        ("Laptop CA uploaded (Intune Cloud PKI root + issuing)", bool(cas),
+        ("Laptop CA uploaded (Intune Cloud PKI root + issuing)",
+         any("TEST" not in c.subject.rfc4514_string().upper() for _, c in cas),
          "Certificates page: upload the two .cer files downloaded from Intune Cloud PKI."),
         ("No TEST CA trusted", not any("TEST" in c.subject.rfc4514_string().upper() for _, c in cas),
          "Certificates page: remove the test CA before go-live."),
@@ -794,7 +854,8 @@ def certificates():
         "certificates.html", s=get_settings(), server=cert_info(chain[0]) if chain else None,
         root=cert_info(chain[-1]) if len(chain) > 1 else None,
         trusted=[cert_info(c, fp) for fp, c in trusted_cas()],
-        panel=cert_info(panel[0]) if panel else None, has_ca_key=ca_key is not None)
+        panel=cert_info(panel[0]) if panel else None, has_ca_key=ca_key is not None,
+        test_active=os.path.exists(f"{TEST_DIR}/ca.pem"))
 
 
 @app.post("/certificates/trusted/upload")
@@ -900,6 +961,36 @@ def import_server():
         apply_config("server certificate import")
     audit("import server certificate", certs[0].subject.rfc4514_string())
     flash("Server certificate imported. RADIUS is reloading.", "ok")
+    return redirect(url_for("certificates"))
+
+
+@app.post("/certificates/test/issue")
+@login_required
+def issue_test():
+    device = request.form.get("device", "").strip()
+    password = request.form.get("password", "")
+    if not DEVICE_RE.match(device):
+        flash("Device name: letters, digits, dot, dash, underscore.", "error")
+        return redirect(url_for("certificates"))
+    if len(password) < 8:
+        flash("Choose a .pfx password of at least 8 characters (you type it when importing).", "error")
+        return redirect(url_for("certificates"))
+    with lock:
+        data = issue_test_client(device, password)
+        apply_config("test certificate")
+    audit("issue test certificate", device)
+    return Response(data, mimetype="application/x-pkcs12",
+                    headers={"Content-Disposition": f"attachment; filename={device}.pfx"})
+
+
+@app.post("/certificates/test/remove")
+@login_required
+def remove_test():
+    with lock:
+        remove_test_ca()
+        apply_config("test CA removed")
+    audit("remove test CA")
+    flash("Test CA removed. Test certificates no longer work.", "ok")
     return redirect(url_for("certificates"))
 
 
