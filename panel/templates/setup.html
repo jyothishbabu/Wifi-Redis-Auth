@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block body %}
+<form method="post" class="card setup">
+  <h1>First-run setup</h1>
+  <p class="muted">Everything here can be changed later in the panel. The setup code is shown by
+    <code>sudo docker compose logs panel</code> on the server.</p>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+
+  <label>Setup code <input name="code" required autocomplete="off" placeholder="XXXXXX-XXXXXX" autofocus></label>
+
+  <h2>Wi-Fi</h2>
+  <label>SSID name (the Wi-Fi network laptops join) <input name="ssid" value="{{ form.ssid }}" required maxlength="32"></label>
+
+  <h2>Admin account</h2>
+  <label>Username <input name="user" value="{{ form.user }}" required autocomplete="username"></label>
+  <label>Password (12+ characters) <input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
+  <label>Password again <input name="confirm" type="password" required minlength="12" autocomplete="new-password"></label>
+
+  <h2>First office</h2>
+  <p class="muted">Its access points may use RADIUS, and only office IPs can open this panel.
+    The IP below is the address you are connecting from now. Add the other offices later on the Offices page.</p>
+  <label>Office name <input name="office" value="{{ form.office }}" required></label>
+  <label>Office public IP <input name="ip" value="{{ form.ip }}" required></label>
+
+  <h2>Server</h2>
+  <label>RADIUS server name (laptops check this name; it needs no DNS) <input name="server_name" value="{{ form.server_name }}" required></label>
+  <label>Panel address (this server's public IP or DNS name) <input name="panel_host" value="{{ form.panel_host }}" required></label>
+
+  <button>Finish setup</button>
+</form>
+{% endblock %}

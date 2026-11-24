@@ -1,0 +1,39 @@
+# Everything is configured in the admin panel: https://<server-ip>:8443
+# First start prints a one-time setup code:  sudo docker compose logs panel
+services:
+  radius:
+    build: .
+    image: wifi-radius:latest
+    container_name: wifi-radius
+    restart: unless-stopped
+    # Host networking (Linux/EC2): FreeRADIUS sees the real office source IPs,
+    # so the per-office client restriction is reliable. UDP 1812 auth, 1813 accounting.
+    network_mode: host
+    volumes:
+      - ./data/config:/etc/raddb/panel-dyn:ro      # written by the panel
+      - ./data/logs:/var/log/wifi-radius            # auth.log + radius.log
+      - ./data/control:/var/run/wifi-radius-control # reload requests + status
+    logging: &logging
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  panel:
+    build: ./panel
+    image: wifi-radius-panel:latest
+    container_name: wifi-radius-panel
+    restart: unless-stopped
+    # HTTPS on 8443. Reachable only from office IPs: the AWS Security Group allows
+    # TCP 8443 from them, and the panel itself refuses any other source IP.
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./data/panel:/data/panel
+      - ./data/config:/data/config
+      - ./data/logs:/data/logs:ro
+      - ./data/control:/data/control
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE, CHOWN, FOWNER]
+    security_opt: [no-new-privileges:true]
+    logging: *logging

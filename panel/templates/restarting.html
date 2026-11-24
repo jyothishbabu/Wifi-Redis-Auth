@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card setup" data-redirect="https://{{ host }}:8443/" data-delay="8000">
+  <h1>{{ 'Setup complete' if first else 'Panel certificate updated' }}</h1>
+  {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  <p>The panel is restarting with its new HTTPS certificate. You'll be taken to
+    <a href="https://{{ host }}:8443/">https://{{ host }}:8443/</a> in a few seconds.</p>
+  <p class="muted">Until Intune pushes the RADIUS root CA to this laptop, the browser shows a certificate warning.
+    You can also download the root from the Certificates page and install it yourself.</p>
+  {% if first %}
+  <h2>Next</h2>
+  <ol>
+    <li>Certificates: upload the Intune Cloud PKI root + issuing CA, and download the RADIUS root CA for Intune.</li>
+    <li>Offices: add the other offices, then open "Aruba config" for each one.</li>
+    <li>AWS Security Group: allow UDP 1812/1813 and TCP 8443 from each office IP.</li>
+  </ol>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ ssid }} RADIUS</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+{% if user %}
+<header>
+  <strong class="brand">{{ ssid }} RADIUS</strong>
+  <nav>
+    {% for ep, label in [('dashboard','Dashboard'),('logins','Logins'),('devices','Devices'),('offices','Offices'),('certificates','Certificates'),('settings_page','Settings'),('config','Logs & config')] %}
+    <a href="{{ url_for(ep) }}" class="{{ 'active' if request.endpoint == ep }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="link">Sign out {{ user }}</button></form>
+</header>
+{% endif %}
+<main>
+  {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  {% block body %}{% endblock %}
+</main>
+</body>
+</html>

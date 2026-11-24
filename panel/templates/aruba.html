@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>Aruba config for {{ o.name }}</h2>
+  <p class="muted">On that office's AP-635 virtual controller: <code>ssh admin@&lt;VC-IP&gt;</code>, then <code>configure terminal</code>, then paste.
+    Replace the two &lt;…&gt; values. This page shows the office's RADIUS secret, so don't share a screenshot of it.</p>
+  <pre class="mono" id="aruba-cli">! {{ ssid }} - Aruba Instant virtual controller config for {{ o.name }}
+
+! 1. Virtual controller IP (needed by dynamic-radius-proxy). Skip if already set.
+virtual-controller-ip &lt;VC-IP&gt;
+
+! 2. Send all RADIUS from the VC IP (leaves the office as {{ o.ip }})
+dynamic-radius-proxy
+
+! 3. RADIUS server in AWS
+wlan auth-server RADIUS-AWS
+  ip {{ s.panel_host or '<AWS-ELASTIC-IP>' }}
+  port 1812
+  acctport 1813
+  key {{ o.secret }}
+  nas-id {{ o.name }}
+  timeout 10
+  retry-count 3
+  exit
+
+! 4. Access rule (same name as the SSID)
+wlan access-rule {{ ssid }}
+  rule any any match any any any permit
+  exit
+
+! 5. The SSID
+wlan ssid-profile {{ ssid }}
+  enable
+  type employee
+  essid {{ ssid }}
+  opmode wpa2-aes
+  vlan &lt;STAFF-VLAN-ID&gt;
+  auth-server RADIUS-AWS
+  radius-accounting
+  radius-accounting-mode user-association
+  rf-band all
+  dtim-period 1
+  broadcast-filter arp
+  dot11k
+  dot11v
+  max-authentication-failures 0
+  exit
+
+commit apply
+
+! Verify: show network {{ ssid }} | show auth-tracebuf | show clients</pre>
+  <p><button type="button" data-copy="aruba-cli">Copy</button> <a class="button secondary" href="{{ url_for('offices') }}">Back to offices</a></p>
+</div>
+{% endblock %}

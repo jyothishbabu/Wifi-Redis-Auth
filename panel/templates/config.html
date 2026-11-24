@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+{% include "_status.html" %}
+
+<div class="card">
+  <h2>Authentication policy</h2>
+  <table>
+    <tr><th>SSID</th><td>{{ ssid }} (WPA2-Enterprise)</td></tr>
+    <tr><th>Method</th><td>EAP-TLS only, TLS 1.2 or later. Passwords are never accepted.</td></tr>
+    <tr><th>Laptop must have</th><td>A certificate from a CA on the Certificates page, whose name is not on the block list</td></tr>
+    <tr><th>Accepted from</th><td>Only the office IPs below, each with its own secret, and Message-Authenticator required (BlastRADIUS protection)</td></tr>
+  </table>
+</div>
+
+<div class="card"><h2>clients.conf (generated, secrets hidden)</h2><pre>{{ clients }}</pre></div>
+<div class="card"><h2>blocked-devices (generated)</h2><pre>{{ blocked_file }}</pre></div>
+
+<div class="card"><h2>RADIUS server log</h2><pre class="log" data-autoscroll>{% for l in radius_log %}{{ l }}
+{% endfor %}</pre></div>
+
+<div class="card">
+  <h2>Admin audit log</h2>
+  <div class="scroll"><table><tr><th>Time (UTC)</th><th>Admin</th><th>From IP</th><th>Action</th><th>Detail</th></tr>
+  {% for a in audit_log %}{% if a|length >= 4 %}<tr><td class="nowrap">{{ a[0]|when }}</td><td>{{ a[1] }}</td><td class="mono">{{ a[2] }}</td><td>{{ a[3] }}</td><td>{{ a[4] if a|length > 4 }}</td></tr>{% endif %}
+  {% else %}<tr><td colspan="5" class="muted">Empty.</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endblock %}

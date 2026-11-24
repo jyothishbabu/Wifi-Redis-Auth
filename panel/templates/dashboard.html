@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block body %}
+{% include "_status.html" %}
+{% if checks|rejectattr(1)|list %}
+<div class="card">
+  <h2>Setup checklist</h2>
+  <table>{% for label, ok, hint in checks %}
+    <tr><td><span class="pill {{ 'ok' if ok else 'bad' }}">{{ 'done' if ok else 'to do' }}</span></td><td>{{ label }}</td><td class="muted">{{ '' if ok else hint }}</td></tr>
+  {% endfor %}</table>
+</div>
+{% endif %}
+{% for c in expiring %}<div class="flash error">Certificate {{ c.subject }} expires {{ c.expires }} ({{ c.days_left }} days). Renew it soon.</div>{% endfor %}
+
+<div class="tiles">
+  <div class="card tile"><span>Accepted (24h)</span><b class="ok-t">{{ accepts }}</b></div>
+  <div class="card tile"><span>Rejected (24h)</span><b class="bad-t">{{ rejects }}</b></div>
+  <div class="card tile"><span>Laptops connected (24h)</span><b>{{ devices }}</b></div>
+  <div class="card tile"><span>Blocked devices</span><b>{{ blocked }}</b></div>
+</div>
+
+<div class="card">
+  <h2>By office (24h)</h2>
+  <table><tr><th>Office</th><th>Accepted</th><th>Rejected</th></tr>
+  {% for name, c in per_office|dictsort %}<tr><td>{{ name }}</td><td>{{ c.ACCEPT }}</td><td>{{ c.REJECT }}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">No logins in the last 24 hours.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2>Latest logins <a class="small-link" href="{{ url_for('logins') }}">all →</a></h2>
+  {% with rows = events %}{% include "_rows.html" %}{% endwith %}
+</div>
+{% endblock %}

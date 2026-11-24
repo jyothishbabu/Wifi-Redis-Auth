@@ -1,0 +1,18 @@
+# Runs after FreeRADIUS has validated the client certificate chain.
+# Reject devices listed in mods-config/files/blocked-devices, accept the rest.
+server check-eap-tls {
+	authorize {
+		blocked_devices
+
+		if (&control:Auth-Type == Reject) {
+			update reply {
+				&Reply-Message := "Device %{TLS-Client-Cert-Common-Name} is blocked"
+			}
+			reject
+		}
+
+		update control {
+			&Auth-Type := Accept
+		}
+	}
+}

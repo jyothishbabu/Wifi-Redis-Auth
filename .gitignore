@@ -1,0 +1,10 @@
+.env
+certs/server/
+certs/private-ca/
+certs/client-ca.pem
+certs/test-clients/
+certs/panel/
+data/
+.DS_Store
+intune/*.cer
+certs/trusted-client-cas/

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block body %}
+<form method="post" action="{{ url_for('save_general') }}" class="card form">
+  <h2>General</h2>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>SSID name <input name="ssid" value="{{ s.ssid }}" required maxlength="32"></label>
+  <label>Extra IPs allowed to open this panel (besides office IPs), space separated
+    <input name="extra_ips" value="{{ s.extra_ips|join(' ') }}" placeholder="e.g. a VPN exit IP">
+    <span class="muted">You are connecting from {{ my_ip }}.</span></label>
+  <label class="check"><input type="checkbox" name="debug" {{ 'checked' if s.debug }}>
+    Verbose RADIUS logging (for troubleshooting a laptop; read it under Configuration → RADIUS server log)</label>
+  <div><button>Save</button></div>
+</form>
+
+<form method="post" action="{{ url_for('save_admin') }}" class="card form">
+  <h2>Admin account</h2>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Username <input name="user" value="{{ s.admin.user }}" required autocomplete="username"></label>
+  <label>New password (leave blank to keep) <input name="password" type="password" minlength="12" autocomplete="new-password"></label>
+  <label>New password again <input name="confirm" type="password" minlength="12" autocomplete="new-password"></label>
+  <label>Current password (required) <input name="current" type="password" required autocomplete="current-password"></label>
+  <div><button>Update account</button></div>
+</form>
+{% endblock %}

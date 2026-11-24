@@ -1,0 +1,14 @@
+<div class="scroll"><table>
+<tr><th>Time (UTC)</th><th>Result</th><th>Device</th><th>MAC</th><th>Office</th><th>AP / NAS</th><th>Reason</th></tr>
+{% for r in rows %}
+<tr>
+  <td class="nowrap">{{ r.ts|when }}</td>
+  <td><span class="pill {{ 'ok' if r.result == 'ACCEPT' else 'bad' }}">{{ r.result }}</span></td>
+  <td><b>{{ r.device or '-' }}</b></td>
+  <td class="mono">{{ r.mac or '-' }}</td>
+  <td>{{ r.office or '-' }}<div class="muted mono">{{ r.src }}</div></td>
+  <td>{{ r.ap or '-' }}<div class="muted">{{ r.nas }}</div></td>
+  <td class="reason">{{ r.reason }}</td>
+</tr>
+{% else %}<tr><td colspan="7" class="muted">No logins match.</td></tr>{% endfor %}
+</table></div>

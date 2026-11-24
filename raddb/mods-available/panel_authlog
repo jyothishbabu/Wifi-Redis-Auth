@@ -1,0 +1,12 @@
+# One tab-separated line per final RADIUS decision, read by the admin panel.
+# Fields: epoch  result  src_ip  office  user  cert_cn  mac  nas_id  ssid  ap  reason
+linelog panel_authlog_accept {
+	filename = /var/log/wifi-radius/auth.log
+	permissions = 0644
+	format = "%l\tACCEPT\t%{Packet-Src-IP-Address}\t%{client:shortname}\t%{User-Name}\t%{TLS-Client-Cert-Common-Name}\t%{Calling-Station-Id}\t%{NAS-Identifier}\t%{Aruba-Essid-Name}\t%{Aruba-Location-Id}\t"
+}
+linelog panel_authlog_reject {
+	filename = /var/log/wifi-radius/auth.log
+	permissions = 0644
+	format = "%l\tREJECT\t%{Packet-Src-IP-Address}\t%{client:shortname}\t%{User-Name}\t%{TLS-Client-Cert-Common-Name}\t%{Calling-Station-Id}\t%{NAS-Identifier}\t%{Aruba-Essid-Name}\t%{Aruba-Location-Id}\t%{Module-Failure-Message}"
+}

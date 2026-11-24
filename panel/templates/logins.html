@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>Login history</h2>
+  <form class="filters" method="get">
+    <input name="q" placeholder="Device, MAC, IP, AP, reason…" value="{{ args.get('q','') }}">
+    <select name="result"><option value="">All results</option>
+      {% for v in ['ACCEPT','REJECT'] %}<option {{ 'selected' if args.get('result')==v }}>{{ v }}</option>{% endfor %}</select>
+    <select name="office"><option value="">All offices</option>
+      {% for o in offices %}<option {{ 'selected' if args.get('office')==o }}>{{ o }}</option>{% endfor %}</select>
+    <select name="hours">
+      {% for h, l in [('1','Last hour'),('24','Last 24h'),('168','Last 7 days'),('0','Everything')] %}
+      <option value="{{ h }}" {{ 'selected' if args.get('hours','168')==h }}>{{ l }}</option>{% endfor %}</select>
+    <button>Filter</button>
+    <a class="button secondary" href="{{ url_for('logins_csv', **args) }}">Export CSV</a>
+  </form>
+  <p class="muted">{{ total }} entries{% if total > 1000 %}, showing the newest 1000 (export for all){% endif %}.</p>
+  {% include "_rows.html" %}
+</div>
+{% endblock %}

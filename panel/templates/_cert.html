@@ -1,0 +1,6 @@
+<table class="cert">
+  <tr><th>Subject</th><td class="mono">{{ c.subject }}</td></tr>
+  <tr><th>Issuer</th><td class="mono">{{ c.issuer }}</td></tr>
+  {% if c.san %}<tr><th>Names</th><td class="mono">{{ c.san }}</td></tr>{% endif %}
+  <tr><th>Expires</th><td><span class="pill {{ 'ok' if c.days_left > 60 else 'bad' }}">{{ c.expires }} · {{ c.days_left }} days</span></td></tr>
+</table>

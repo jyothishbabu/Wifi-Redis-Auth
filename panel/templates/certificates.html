@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>1. Trusted laptop CAs (Intune Cloud PKI)</h2>
+  <p class="muted">Only laptops whose certificate was issued by one of these CAs can join {{ ssid }}.
+    In Intune: Tenant administration → Cloud PKI → open the root CA → Download, then the same for the issuing CA. Upload both here.</p>
+  {% for c in trusted %}
+    {% include "_cert.html" %}
+    <form method="post" action="{{ url_for('remove_trusted') }}" class="right" data-confirm="Remove this CA? Laptops with certificates from it will be rejected.">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="fp" value="{{ c.fp }}">
+      <button class="small danger">Remove</button></form>
+  {% else %}<div class="flash error">No laptop CA yet. RADIUS can't start until you upload one.</div>{% endfor %}
+  {% if 'TEST' in (trusted|map(attribute='subject')|join(' '))|upper %}<div class="flash error">A TEST CA is trusted. Remove it before go-live.</div>{% endif %}
+  <form method="post" action="{{ url_for('upload_trusted') }}" enctype="multipart/form-data" class="filters">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="file" name="files" accept=".cer,.crt,.pem" multiple required>
+    <button>Upload</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>2. RADIUS server certificate</h2>
+  <p class="muted">Laptops check this certificate before they send theirs, so a fake access point can't impersonate the server.</p>
+  {% if server %}{% with c = server %}{% include "_cert.html" %}{% endwith %}{% endif %}
+  {% if root %}
+  <h2>RADIUS root CA (upload to Intune as a "Trusted certificate" profile)</h2>
+  {% with c = root %}{% include "_cert.html" %}{% endwith %}
+  <p><a class="button" href="{{ url_for('download_root') }}">Download RADIUS-Root-CA.cer</a></p>
+  <table class="cert"><tr><th>Intune Wi-Fi profile</th><td>Certificate server names: <b class="mono">{{ s.server_name }}</b> · Root certificates for server validation: the profile with this .cer</td></tr></table>
+  {% endif %}
+
+  <details>
+    <summary>Generate a new server certificate</summary>
+    <form method="post" action="{{ url_for('regen_server') }}" class="filters"
+          data-confirm="Replace the RADIUS server certificate? Same root CA, so Intune needs no new trusted certificate (unless you change the name).">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input name="server_name" value="{{ s.server_name }}" required>
+      <button>Generate</button>
+    </form>
+  </details>
+  <details>
+    <summary>Import an existing server certificate</summary>
+    <form method="post" action="{{ url_for('import_server') }}" enctype="multipart/form-data" class="form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Server certificate (PEM) <input type="file" name="cert" required></label>
+      <label>Server private key (unencrypted PEM) <input type="file" name="key" required></label>
+      <label>Root CA certificate (PEM or DER) <input type="file" name="ca" required></label>
+      <label>Root CA private key (optional; lets the panel issue new certificates from it) <input type="file" name="ca_key"></label>
+      <div><button>Import</button></div>
+    </form>
+  </details>
+</div>
+
+<div class="card">
+  <h2>3. Admin panel HTTPS certificate</h2>
+  {% if panel %}{% with c = panel %}{% include "_cert.html" %}{% endwith %}{% endif %}
+  {% if not has_ca_key %}<p class="flash info">No root CA private key on the server, so this certificate is self-signed.</p>{% endif %}
+  <form method="post" action="{{ url_for('regen_panel') }}" class="filters" data-confirm="Re-issue the panel certificate? The panel restarts (about 10 seconds).">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="panel_host" value="{{ s.panel_host }}" required placeholder="Elastic IP or DNS name">
+    <button>Re-issue and restart panel</button>
+  </form>
+</div>
+{% endblock %}

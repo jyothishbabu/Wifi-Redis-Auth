@@ -1,0 +1,10 @@
+{% set running = status.state == 'running' and not status.stale %}
+<div class="card status" id="status" data-reload-at="{{ status.reload_at or 0 }}">
+  <span class="dot {{ 'ok' if running else 'bad' }}"></span>
+  <strong>RADIUS {{ 'running' if running else ('not reporting' if status.stale else status.state) }}</strong>
+  {% if running %}<span class="muted">since {{ status.since|when }} · restarts {{ status.restarts }}</span>{% endif %}
+  {% if status.reload_pending %}<span class="pill warn">reload pending…</span>
+  {% elif status.reload_at %}<span class="pill {{ 'ok' if status.reload_ok else 'bad' }}">last reload {{ 'OK' if status.reload_ok else 'FAILED (old config still active)' }} · {{ status.reload_at|when }}</span>{% endif %}
+  <form method="post" action="{{ url_for('reload_radius') }}" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Reload now</button></form>
+  {% if status.reload_error %}<pre class="error">{{ status.reload_error }}</pre>{% endif %}
+</div>
