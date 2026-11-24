@@ -1,4 +1,4 @@
-FROM freeradius/freeradius-server:3.2.7-alpine
+FROM freeradius/freeradius-server:3.2.10-alpine
 
 # Our config overrides (image config lives in /etc/raddb -> /opt/etc/raddb)
 COPY raddb/clients.conf                     /etc/raddb/clients.conf
