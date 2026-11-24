@@ -70,7 +70,8 @@
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input name="device" value="TEST-LAPTOP" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}">
     <input name="password" type="password" minlength="8" required placeholder="Password for the .pfx file" autocomplete="new-password">
-    <button>Download test .pfx</button>
+    <button name="format" value="pfx">Windows: download .pfx</button>
+    <button name="format" value="mobileconfig">Mac / iPhone: download .mobileconfig</button>
   </form>
   {% if test_active %}
   <form method="post" action="{{ url_for('remove_test') }}" data-confirm="Remove the test CA? Every test certificate stops working.">
@@ -91,6 +92,19 @@
       <li>Connect to {{ ssid }}. If Windows asks which certificate, pick the test one. It must not ask for a password.</li>
     </ol>
     <p class="muted">Before installing Intune profiles on this laptop later, delete this manual Wi-Fi network and the test certificate (certmgr.msc → Personal).</p>
+  </details>
+  <details>
+    <summary>How to set up a Mac (or iPhone / iPad)</summary>
+    <ol>
+      <li>Download the <b>.mobileconfig</b> above and open it on the Mac (AirDrop or email it to an iPhone).</li>
+      <li>macOS: <b>System Settings → General → Device Management</b> (older macOS: Privacy &amp; Security → Profiles) →
+        double-click the downloaded profile → <b>Install</b>. iPhone: Settings → <b>Profile Downloaded</b> → Install.</li>
+      <li>Enter the <b>.pfx password</b> you chose when asked, then your Mac login password.
+        The profile shows "Unverified": that is expected for a test profile.</li>
+      <li>Choose <b>{{ ssid }}</b> from the Wi-Fi menu. It connects with no username or password.
+        If macOS asks which certificate to use, pick the TEST one.</li>
+      <li>Remove after testing: Device Management → select the profile → <b>−</b> (minus). This deletes the certificate and the network.</li>
+    </ol>
   </details>
 </div>
 {% endblock %}

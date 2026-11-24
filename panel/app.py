@@ -12,11 +12,13 @@ import io
 import ipaddress
 import json
 import os
+import plistlib
 import re
 import secrets
 import signal
 import threading
 import time
+import uuid
 from functools import wraps
 
 from cryptography import x509
@@ -266,6 +268,34 @@ def issue_test_client(device, password):
            .key_cert_algorithm(pkcs12.PBES.PBESv1SHA1And3KeyTripleDESCBC).hmac_hash(hashes.SHA1())
            .build(password.encode()))
     return pkcs12.serialize_key_and_certificates(device.encode(), k, c, [ca_cert], enc)
+
+
+def mac_test_profile(device, pfx, ssid, server_name, root_der):
+    """Apple configuration profile: RADIUS root + test identity + EAP-TLS Wi-Fi network."""
+    ids = {k: str(uuid.uuid4()).upper() for k in ("top", "root", "id", "wifi")}
+    base = "local.wifi-radius.test"
+
+    def payload(kind, ptype, name, **extra):
+        return {"PayloadType": ptype, "PayloadVersion": 1, "PayloadUUID": ids[kind],
+                "PayloadIdentifier": f"{base}.{kind}.{ids[kind]}", "PayloadDisplayName": name, **extra}
+
+    content = [
+        payload("root", "com.apple.security.root", "RADIUS Root CA",
+                PayloadContent=root_der, PayloadCertificateFileName="RADIUS-Root-CA.cer"),
+        payload("id", "com.apple.security.pkcs12", f"TEST certificate {device}",
+                PayloadContent=pfx, PayloadCertificateFileName=f"{device}.pfx"),
+        payload("wifi", "com.apple.wifi.managed", f"{ssid} (EAP-TLS)",
+                SSID_STR=ssid, HIDDEN_NETWORK=False, AutoJoin=True, EncryptionType="WPA2",
+                IsHotspot=False, ProxyType="None", PayloadCertificateUUID=ids["id"],
+                EAPClientConfiguration={"AcceptEAPTypes": [13], "UserName": device,
+                                        "TLSTrustedServerNames": [server_name],
+                                        "PayloadCertificateAnchorUUID": [ids["root"]]}),
+    ]
+    top = {"PayloadType": "Configuration", "PayloadVersion": 1, "PayloadUUID": ids["top"],
+           "PayloadIdentifier": f"{base}.{ids['top']}", "PayloadDisplayName": f"{ssid} Wi-Fi TEST ({device})",
+           "PayloadDescription": "Test certificate and Wi-Fi settings. Remove after testing.",
+           "PayloadRemovalDisallowed": False, "PayloadContent": content}
+    return plistlib.dumps(top)
 
 
 def remove_test_ca():
@@ -975,10 +1005,21 @@ def issue_test():
     if len(password) < 8:
         flash("Choose a .pfx password of at least 8 characters (you type it when importing).", "error")
         return redirect(url_for("certificates"))
+    chain = server_chain()
+    if len(chain) < 2:
+        flash("Generate the RADIUS server certificate first (section 2).", "error")
+        return redirect(url_for("certificates"))
+    fmt = request.form.get("format", "pfx")
     with lock:
         data = issue_test_client(device, password)
         apply_config("test certificate")
-    audit("issue test certificate", device)
+    audit("issue test certificate", f"{device} ({fmt})")
+    if fmt == "mobileconfig":
+        s = get_settings()
+        prof = mac_test_profile(device, data, s["ssid"], s["server_name"],
+                                chain[-1].public_bytes(serialization.Encoding.DER))
+        return Response(prof, mimetype="application/x-apple-aspen-config",
+                        headers={"Content-Disposition": f"attachment; filename={device}.mobileconfig"})
     return Response(data, mimetype="application/x-pkcs12",
                     headers={"Content-Disposition": f"attachment; filename={device}.pfx"})
 
