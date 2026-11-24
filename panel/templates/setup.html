@@ -20,7 +20,7 @@
   <p class="muted">Its access points may use RADIUS, and only office IPs can open this panel.
     The IP below is the address you are connecting from now. Add the other offices later on the Offices page.</p>
   <label>Office name <input name="office" value="{{ form.office }}" required></label>
-  <label>Office public IP <input name="ip" value="{{ form.ip }}" required></label>
+  <label>Office public IPs (comma or space separated, if the office has more than one) <input name="ip" value="{{ form.ip }}" required></label>
 
   <h2>Server</h2>
   <label>RADIUS server name (laptops check this name; it needs no DNS) <input name="server_name" value="{{ form.server_name }}" required></label>

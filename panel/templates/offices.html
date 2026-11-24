@@ -11,7 +11,7 @@
   <form method="post" action="{{ url_for('save_office') }}" class="office">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="orig" value="{{ o.name }}">
     <label>Name <input name="name" value="{{ o.name }}" required></label>
-    <label>Public IP <input name="ip" value="{{ o.ip }}" required></label>
+    <label>Public IPs (comma or space separated) <input name="ip" value="{{ o.ips|join(', ') }}" required></label>
     <label>Shared secret
       <span class="secret"><input name="secret" type="password" placeholder="leave blank to keep" autocomplete="off" data-current="{{ o.secret }}">
       <button type="button" class="small secondary" data-reveal>Show current</button>
@@ -30,7 +30,7 @@
   <form method="post" action="{{ url_for('save_office') }}" class="office">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="orig" value="">
     <label>Name <input name="name" placeholder="office_sg" required></label>
-    <label>Public IP <input name="ip" placeholder="from: curl -4 ifconfig.me" required>
+    <label>Public IPs (comma or space separated) <input name="ip" placeholder="e.g. 203.0.113.10, 203.0.113.11" required>
       <span class="muted">You are connecting from {{ my_ip }}.</span></label>
     <label>Shared secret
       <span class="secret"><input name="secret" value="{{ suggested }}" autocomplete="off" required>

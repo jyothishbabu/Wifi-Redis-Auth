@@ -9,7 +9,7 @@
 ! 1. Virtual controller IP (needed by dynamic-radius-proxy). Skip if already set.
 virtual-controller-ip &lt;VC-IP&gt;
 
-! 2. Send all RADIUS from the VC IP (leaves the office as {{ o.ip }})
+! 2. Send all RADIUS from the VC IP (this office is allowed from {{ o.ips|join(', ') }})
 dynamic-radius-proxy
 
 ! 3. RADIUS server in AWS
