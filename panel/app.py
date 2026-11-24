@@ -23,6 +23,7 @@ import uuid
 from functools import wraps
 
 from installers import mac_profile, windows_installer
+from intune import IntuneCache
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -44,6 +45,7 @@ SETUP_CODE = f"{P_DIR}/setup-code"
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 DEVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 SSID_RE = re.compile(r"^[A-Za-z0-9 _.-]{1,32}$")
 HOST_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
 # No quotes, backslash, $, braces or spaces: they would break clients.conf.
@@ -97,7 +99,8 @@ def gen_secret():
 
 # ================================================================ settings
 DEFAULTS = {"configured": False, "ssid": "", "admin": {"user": "", "hash": ""}, "offices": [],
-            "extra_ips": [], "debug": False, "server_name": "radius.wifi.internal", "panel_host": ""}
+            "extra_ips": [], "debug": False, "server_name": "radius.wifi.internal", "panel_host": "",
+            "intune": {}}
 
 
 def get_settings():
@@ -483,6 +486,15 @@ with lock:
         apply_config("first start")
 
 
+def intune_config():
+    c = get_settings().get("intune") or {}
+    return c if c.get("tenant_id") and c.get("client_id") and c.get("client_secret") else None
+
+
+INTUNE = IntuneCache(f"{P_DIR}/intune-cache.json", intune_config)
+INTUNE.start()
+
+
 def client_ip():
     return request.remote_addr or "-"
 
@@ -518,7 +530,8 @@ def headers(resp):
 def inject():
     if "csrf" not in session:
         session["csrf"] = secrets.token_urlsafe(24)
-    return {"csrf": session["csrf"], "user": session.get("user"), "ssid": get_settings()["ssid"] or "Wi-Fi"}
+    return {"csrf": session["csrf"], "user": session.get("user"), "ssid": get_settings()["ssid"] or "Wi-Fi",
+            "intune": INTUNE.lookup, "intune_on": INTUNE.enabled()}
 
 
 @app.template_filter("when")
@@ -714,8 +727,12 @@ def dashboard():
         o = per_office.setdefault(r["office"] or "?", {"ACCEPT": 0, "REJECT": 0})
         o[r["result"]] = o.get(r["result"], 0) + 1
     certs = [cert_info(c) for c in server_chain()] + [cert_info(c) for _, c in trusted_cas()]
+    ok_devices = {r["device"] for r in recent if r["result"] == "ACCEPT" and r["device"]}
+    not_in_intune = sorted(d for d in ok_devices if INTUNE.enabled() and not INTUNE.lookup(d))
+    noncompliant = sorted(d for d in ok_devices if (INTUNE.lookup(d) or {}).get("complianceState") == "noncompliant")
     return render_template(
         "dashboard.html", status=server_status(), events=rows[:15], checks=checklist(s),
+        not_in_intune=not_in_intune, noncompliant=noncompliant, intune_state=INTUNE.state(),
         accepts=sum(r["result"] == "ACCEPT" for r in recent),
         rejects=sum(r["result"] == "REJECT" for r in recent),
         devices=len({r["device"] for r in recent if r["result"] == "ACCEPT"}),
@@ -754,10 +771,14 @@ def logins():
 def logins_csv():
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["time_utc", "result", "device", "mac", "office", "source_ip", "nas_id", "ssid", "ap", "reason"])
+    w.writerow(["time_utc", "result", "device", "mac", "office", "source_ip", "nas_id", "ssid", "ap", "reason",
+                "intune_user", "intune_model", "intune_serial", "intune_os", "intune_compliance"])
     for r in filtered_rows():
+        i = INTUNE.lookup(r["device"]) or {}
         w.writerow([when(r["ts"]), r["result"], r["device"], r["mac"], r["office"], r["src"],
-                    r["nas"], r["ssid"], r["ap"], r["reason"]])
+                    r["nas"], r["ssid"], r["ap"], r["reason"], i.get("userPrincipalName", ""),
+                    f"{i.get('manufacturer', '')} {i.get('model', '')}".strip(), i.get("serialNumber", ""),
+                    f"{i.get('operatingSystem', '')} {i.get('osVersion', '')}".strip(), i.get("complianceState", "")])
     return Response(buf.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=wifi-logins.csv"})
 
@@ -1150,7 +1171,7 @@ def regen_panel():
 @app.route("/settings")
 @login_required
 def settings_page():
-    return render_template("settings.html", s=get_settings(), my_ip=client_ip())
+    return render_template("settings.html", s=get_settings(), my_ip=client_ip(), istate=INTUNE.state())
 
 
 @app.post("/settings/general")
@@ -1182,6 +1203,56 @@ def save_general():
     audit("save settings", f"ssid={ssid} extra_ips={' '.join(extra)} debug={debug}")
     flash("Settings saved.", "ok")
     return redirect(url_for("settings_page"))
+
+
+@app.post("/settings/intune")
+@login_required
+def save_intune():
+    if request.form.get("action") == "disconnect":
+        with lock:
+            s = get_settings()
+            s["intune"] = {}
+            save_settings(s)
+        audit("intune disconnected")
+        flash("Intune connection removed.", "ok")
+        return redirect(url_for("settings_page"))
+    tenant = request.form.get("tenant_id", "").strip()
+    client = request.form.get("client_id", "").strip()
+    secret = request.form.get("client_secret", "").strip()
+    current = get_settings().get("intune") or {}
+    secret = secret or current.get("client_secret", "")
+    errors = []
+    if not (GUID_RE.match(tenant) or HOST_RE.match(tenant)):
+        errors.append("Tenant ID: the Directory (tenant) ID from the app registration's Overview page.")
+    if not GUID_RE.match(client):
+        errors.append("Client ID: the Application (client) ID from the app registration's Overview page.")
+    if not secret or len(secret) > 256 or any(ch in secret for ch in "\r\n"):
+        errors.append("Client secret: paste the secret's Value (not its ID).")
+    if errors:
+        for e in errors:
+            flash(e, "error")
+        return redirect(url_for("settings_page"))
+    with lock:
+        s = get_settings()
+        s["intune"] = {"tenant_id": tenant, "client_id": client, "client_secret": secret}
+        save_settings(s)
+    ok = INTUNE.refresh()
+    st = INTUNE.state()
+    audit("intune connected" if ok else "intune connection failed", tenant)
+    if ok:
+        flash(f"Connected to Intune: {st['count']} devices found. Details now show on Logins and Devices.", "ok")
+    else:
+        flash(f"Saved, but Intune said: {st['error']}", "error")
+    return redirect(url_for("settings_page"))
+
+
+@app.post("/settings/intune/refresh")
+@login_required
+def refresh_intune():
+    ok = INTUNE.refresh()
+    st = INTUNE.state()
+    flash(f"Intune refreshed: {st['count']} devices." if ok else f"Intune said: {st['error']}", "ok" if ok else "error")
+    return redirect(request.referrer or url_for("settings_page"))
 
 
 @app.post("/settings/admin")

@@ -4,7 +4,7 @@
 <tr>
   <td class="nowrap">{{ r.ts|when }}</td>
   <td><span class="pill {{ 'ok' if r.result == 'ACCEPT' else 'bad' }}">{{ r.result }}</span></td>
-  <td><b>{{ r.device or '-' }}</b></td>
+  <td><b>{{ r.device or '-' }}</b>{% with name = r.device %}{% include "_intune.html" %}{% endwith %}</td>
   <td class="mono">{{ r.mac or '-' }}</td>
   <td>{{ r.office or '-' }}<div class="muted mono">{{ r.src }}</div></td>
   <td>{{ r.ap or '-' }}<div class="muted">{{ r.nas }}</div></td>

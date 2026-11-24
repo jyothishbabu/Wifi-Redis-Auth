@@ -53,10 +53,14 @@
 <div class="card">
   <h2>Devices seen</h2>
   <div class="scroll"><table>
-  <tr><th>Device</th><th>Last seen (UTC)</th><th>Last result</th><th>MAC</th><th>Office</th><th>OK / Rejected</th><th></th></tr>
+  <tr><th>Device</th>{% if intune_on %}<th>Intune</th><th>OS / last Intune sync</th>{% endif %}<th>Last seen (UTC)</th><th>Last result</th><th>MAC</th><th>Office</th><th>OK / Rejected</th><th></th></tr>
   {% for d in seen %}
   <tr>
     <td><b>{{ d.name }}</b>{% if d.name.lower() in bnames %} <span class="pill bad">blocked</span>{% endif %}</td>
+    {% if intune_on %}{% set i = intune(d.name) %}
+    <td>{% with name = d.name %}{% include "_intune.html" %}{% endwith %}</td>
+    <td>{% if i %}{{ i.operatingSystem }} {{ i.osVersion }}<div class="muted">{{ (i.lastSyncDateTime or '')[:16]|replace('T', ' ') }}</div>{% endif %}</td>
+    {% endif %}
     <td class="nowrap">{{ d.last|when }}</td>
     <td><span class="pill {{ 'ok' if d.result == 'ACCEPT' else 'bad' }}">{{ d.result }}</span>
       {% if d.result != 'ACCEPT' %}<div class="reason">{{ d.reason }}</div>{% endif %}</td>
@@ -67,7 +71,7 @@
         <input type="hidden" name="note" value="blocked from Devices page">
         <button class="small danger">Block</button></form>{% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="7" class="muted">No devices have tried to connect yet.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="9" class="muted">No devices have tried to connect yet.</td></tr>{% endfor %}
   </table></div>
 </div>
 {% endblock %}

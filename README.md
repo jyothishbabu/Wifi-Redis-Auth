@@ -36,7 +36,7 @@ Laptops join only with a certificate from Intune Cloud PKI. Passwords and MAC fi
 | **Certificates** | Server certificates and the RADIUS root. Optional: upload Intune Cloud PKI CAs |
 | **Dashboard** | Setup checklist, status, logins in the last 24h, certificate expiry |
 | **Logins / Devices** | Who connected or was rejected and why. **Remove** or **Block** a laptop with one click |
-| **Settings** | SSID, admin account, extra admin IPs, verbose logging |
+| **Settings** | SSID, admin account, extra admin IPs, verbose logging, **Intune connection** (read-only: user, model, serial, OS, compliance per laptop) |
 
 ### Installing a laptop (same idea on Windows and Mac)
 - **Windows:** open `Install-WiFi-<laptop>.cmd` and click **Yes** on the admin prompt. It installs the root, the certificate and the Wi-Fi network for the whole computer.

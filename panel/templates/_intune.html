@@ -1,0 +1,11 @@
+{# Intune details for one device name: `name`. Compact block for table cells. #}
+{% set i = intune(name) if intune_on else None %}
+{% if i %}
+  <div class="muted">{{ i.userDisplayName or i.userPrincipalName or 'no user' }}</div>
+  <div class="muted">{{ i.manufacturer }} {{ i.model }}{% if i.serialNumber %} · {{ i.serialNumber }}{% endif %}</div>
+  {% if i.complianceState == 'noncompliant' %}<span class="pill bad">non-compliant</span>
+  {% elif i.complianceState == 'compliant' %}<span class="pill ok">compliant</span>
+  {% elif i.complianceState %}<span class="pill warn">{{ i.complianceState }}</span>{% endif %}
+{% elif intune_on and name %}
+  <span class="pill warn">not in Intune</span>
+{% endif %}

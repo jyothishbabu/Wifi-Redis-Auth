@@ -21,4 +21,37 @@
   <label>Current password (required) <input name="current" type="password" required autocomplete="current-password"></label>
   <div><button>Update account</button></div>
 </form>
+
+<form method="post" action="{{ url_for('save_intune') }}" class="card form">
+  <h2>Intune (Microsoft Graph, read-only)</h2>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if intune_on %}
+    <p>{% if istate.error %}<span class="pill bad">error</span> {{ istate.error }}
+       {% else %}<span class="pill ok">connected</span> {{ istate.count }} devices, refreshed {{ istate.updated|when }} (every 15 minutes){% endif %}</p>
+  {% else %}
+    <p class="muted">Shows each laptop's Intune user, model, serial, OS and compliance next to its Wi-Fi logins.</p>
+  {% endif %}
+  <details {{ '' if intune_on else 'open' }}>
+    <summary>How to get these values (5 minutes, once)</summary>
+    <ol>
+      <li>entra.microsoft.com → <b>App registrations → New registration</b>. Name it <code>Wi-Fi RADIUS panel</code>, single tenant, no redirect URI → Register.</li>
+      <li>On its Overview page, copy the <b>Application (client) ID</b> and the <b>Directory (tenant) ID</b>.</li>
+      <li><b>API permissions → Add a permission → Microsoft Graph → Application permissions</b> →
+        <code>DeviceManagementManagedDevices.Read.All</code> → Add, then <b>Grant admin consent</b>.</li>
+      <li><b>Certificates &amp; secrets → New client secret</b> (24 months) → copy the secret's <b>Value</b>.</li>
+      <li>Paste the three values below and click Connect. Put a reminder in your calendar to renew the secret before it expires.</li>
+    </ol>
+  </details>
+  <label>Directory (tenant) ID <input name="tenant_id" value="{{ s.intune.tenant_id if s.intune else '' }}" required></label>
+  <label>Application (client) ID <input name="client_id" value="{{ s.intune.client_id if s.intune else '' }}" required></label>
+  <label>Client secret value {% if intune_on %}(leave blank to keep){% endif %}
+    <input name="client_secret" type="password" autocomplete="off" {{ '' if intune_on else 'required' }}></label>
+  <div class="filters">
+    <button>{{ 'Save and test' if intune_on else 'Connect' }}</button>
+    {% if intune_on %}
+      <button formaction="{{ url_for('refresh_intune') }}" formnovalidate class="secondary">Refresh now</button>
+      <button name="action" value="disconnect" formnovalidate class="danger">Disconnect</button>
+    {% endif %}
+  </div>
+</form>
 {% endblock %}

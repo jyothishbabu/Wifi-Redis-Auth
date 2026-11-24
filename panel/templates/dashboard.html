@@ -16,7 +16,14 @@
   <div class="card tile"><span>Rejected (24h)</span><b class="bad-t">{{ rejects }}</b></div>
   <div class="card tile"><span>Laptops connected (24h)</span><b>{{ devices }}</b></div>
   <div class="card tile"><span>Blocked devices</span><b>{{ blocked }}</b></div>
+  {% if intune_on %}
+  <div class="card tile"><span>Connected but not in Intune (24h)</span><b class="{{ 'bad-t' if not_in_intune }}">{{ not_in_intune|length }}</b></div>
+  <div class="card tile"><span>Connected while non-compliant (24h)</span><b class="{{ 'bad-t' if noncompliant }}">{{ noncompliant|length }}</b></div>
+  {% endif %}
 </div>
+{% if intune_on and intune_state.error %}<div class="flash error">Intune: {{ intune_state.error }} (Settings → Intune).</div>{% endif %}
+{% if not_in_intune %}<div class="flash info">Connected but not found in Intune: {{ not_in_intune|join(', ') }}. Fine for laptops added with an install link; otherwise check them on the Devices page.</div>{% endif %}
+{% if noncompliant %}<div class="flash error">Non-compliant in Intune but connected: {{ noncompliant|join(', ') }}.</div>{% endif %}
 
 <div class="card">
   <h2>By office (24h)</h2>
