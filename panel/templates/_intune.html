@@ -1,5 +1,5 @@
 {# Intune details for one device name: `name`. Compact block for table cells. #}
-{% set i = intune(name) if intune_on else None %}
+{% set i = (intune(name) or (intune(alt) if alt else None)) if intune_on else None %}
 {% if i %}
   <div class="muted">{{ i.userDisplayName or i.userPrincipalName or 'no user' }}</div>
   <div class="muted">{{ i.manufacturer }} {{ i.model }}{% if i.serialNumber %} · {{ i.serialNumber }}{% endif %}</div>

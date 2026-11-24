@@ -86,3 +86,4 @@ ol { padding-left: 20px; }
 h3 { font-size: 14px; margin: 14px 0 6px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
+.small-id { font-size: 11px; }

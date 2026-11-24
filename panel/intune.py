@@ -16,7 +16,7 @@ import urllib.request
 LOGIN_URL = os.environ.get("INTUNE_LOGIN_URL", "https://login.microsoftonline.com")
 GRAPH_URL = os.environ.get("INTUNE_GRAPH_URL", "https://graph.microsoft.com")
 FIELDS = ("id,deviceName,userPrincipalName,userDisplayName,manufacturer,model,serialNumber,"
-          "operatingSystem,osVersion,complianceState,lastSyncDateTime,enrolledDateTime")
+          "operatingSystem,osVersion,complianceState,lastSyncDateTime,enrolledDateTime,azureADDeviceId")
 REFRESH_SECS = 15 * 60
 
 
@@ -83,7 +83,9 @@ class IntuneCache:
     def lookup(self, name):
         if not name or not self.enabled():
             return None
-        return self.state()["devices"].get(name.lower())
+        st = self.state()
+        key = name.lower().removeprefix("host/")
+        return st["devices"].get(key) or st.get("by_id", {}).get(key)
 
     def refresh(self):
         cfg = self.get_config()
@@ -101,7 +103,14 @@ class IntuneCache:
                     old = by_name.get(key)  # re-enrolled devices: keep the most recently synced
                     if old is None or (d.get("lastSyncDateTime") or "") > (old.get("lastSyncDateTime") or ""):
                         by_name[key] = d
-                st.update(devices=by_name, count=len(by_name), updated=int(time.time()), error="")
+                # Certificates may carry the device name, the Entra device ID ({{AAD_Device_ID}})
+                # or the Intune device ID ({{DeviceId}}): index all three.
+                by_id = {}
+                for d in by_name.values():
+                    for k in (d.get("id"), d.get("azureADDeviceId")):
+                        if k and k != "00000000-0000-0000-0000-000000000000":
+                            by_id[k.lower()] = d
+                st.update(devices=by_name, by_id=by_id, count=len(by_name), updated=int(time.time()), error="")
                 ok = True
             except IntuneError as e:
                 st.update(error=str(e), error_at=int(time.time()))

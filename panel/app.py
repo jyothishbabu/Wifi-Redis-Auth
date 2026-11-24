@@ -495,6 +495,19 @@ INTUNE = IntuneCache(f"{P_DIR}/intune-cache.json", intune_config)
 INTUNE.start()
 
 
+def device_label(cert_name, eap_user=""):
+    """Friendly name for a laptop: Intune device name, else the Windows computer name the laptop
+    sent as its login identity (host/NAME), else the certificate name itself."""
+    i = INTUNE.lookup(cert_name)
+    if i and i.get("deviceName"):
+        return i["deviceName"]
+    u = (eap_user or "").removeprefix("host/").split(".")[0]
+    if u and u.lower() != (cert_name or "").lower():
+        i = INTUNE.lookup(u)
+        return i["deviceName"] if i and i.get("deviceName") else u
+    return cert_name
+
+
 def client_ip():
     return request.remote_addr or "-"
 
@@ -533,7 +546,7 @@ def inject():
     st = get_settings()
     return {"csrf": session["csrf"], "user": session.get("user"), "ssid": st["ssid"] or "Wi-Fi",
             "app_name": st["app_name"] or "WiFi Redis Authenticator",
-            "intune": INTUNE.lookup, "intune_on": INTUNE.enabled()}
+            "intune": INTUNE.lookup, "intune_on": INTUNE.enabled(), "device_label": device_label}
 
 
 @app.template_filter("when")
@@ -729,9 +742,12 @@ def dashboard():
         o = per_office.setdefault(r["office"] or "?", {"ACCEPT": 0, "REJECT": 0})
         o[r["result"]] = o.get(r["result"], 0) + 1
     certs = [cert_info(c) for c in server_chain()] + [cert_info(c) for _, c in trusted_cas()]
-    ok_devices = {r["device"] for r in recent if r["result"] == "ACCEPT" and r["device"]}
-    not_in_intune = sorted(d for d in ok_devices if INTUNE.enabled() and not INTUNE.lookup(d))
-    noncompliant = sorted(d for d in ok_devices if (INTUNE.lookup(d) or {}).get("complianceState") == "noncompliant")
+    ok_devices = {r["device"]: r["user"] for r in recent if r["result"] == "ACCEPT" and r["device"]}
+    def found(d, u):
+        return INTUNE.lookup(d) or INTUNE.lookup(u or "")
+    not_in_intune = sorted(device_label(d, u) for d, u in ok_devices.items() if INTUNE.enabled() and not found(d, u))
+    noncompliant = sorted(device_label(d, u) for d, u in ok_devices.items()
+                          if (found(d, u) or {}).get("complianceState") == "noncompliant")
     return render_template(
         "dashboard.html", status=server_status(), events=rows[:15], checks=checklist(s),
         not_in_intune=not_in_intune, noncompliant=noncompliant, intune_state=INTUNE.state(),
@@ -756,7 +772,8 @@ def filtered_rows():
         rows = [r for r in rows if r["office"] == office]
     if q:
         rows = [r for r in rows if any(q in str(r[k]).lower()
-                                       for k in ("device", "mac", "src", "nas", "ap", "reason", "user"))]
+                                       for k in ("device", "mac", "src", "nas", "ap", "reason", "user"))
+                or q in device_label(r["device"], r["user"]).lower()]
     return rows
 
 
@@ -773,11 +790,11 @@ def logins():
 def logins_csv():
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["time_utc", "result", "device", "mac", "office", "source_ip", "nas_id", "ssid", "ap", "reason",
+    w.writerow(["time_utc", "result", "device_name", "certificate_name", "mac", "office", "source_ip", "nas_id", "ssid", "ap", "reason",
                 "intune_user", "intune_model", "intune_serial", "intune_os", "intune_compliance"])
     for r in filtered_rows():
-        i = INTUNE.lookup(r["device"]) or {}
-        w.writerow([when(r["ts"]), r["result"], r["device"], r["mac"], r["office"], r["src"],
+        i = INTUNE.lookup(r["device"]) or INTUNE.lookup(r["user"]) or {}
+        w.writerow([when(r["ts"]), r["result"], device_label(r["device"], r["user"]), r["device"], r["mac"], r["office"], r["src"],
                     r["nas"], r["ssid"], r["ap"], r["reason"], i.get("userPrincipalName", ""),
                     f"{i.get('manufacturer', '')} {i.get('model', '')}".strip(), i.get("serialNumber", ""),
                     f"{i.get('operatingSystem', '')} {i.get('osVersion', '')}".strip(), i.get("complianceState", "")])
@@ -794,7 +811,8 @@ def devices():
         d = seen.get(r["device"])
         if d is None:
             d = seen[r["device"]] = {"name": r["device"], "last": r["ts"], "result": r["result"], "mac": r["mac"],
-                                     "office": r["office"], "reason": r["reason"], "ok": 0, "bad": 0}
+                                     "office": r["office"], "reason": r["reason"], "ok": 0, "bad": 0,
+                                     "label": device_label(r["device"], r["user"])}
         d["ok" if r["result"] == "ACCEPT" else "bad"] += 1
     blocked = get_blocked()
     return render_template("devices.html", seen=[d for k, d in seen.items() if k], blocked=blocked,
