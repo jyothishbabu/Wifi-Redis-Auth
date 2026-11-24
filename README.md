@@ -2,7 +2,7 @@
 
 ```
 Intune laptop ── SSID ──► Aruba AP / Virtual Controller ──(UDP 1812, office public IP)──► AWS EC2
- (device cert from                                                                        ├─ FreeRADIUS (EAP-TLS only)
+ (device cert from                                                                        ├─ Redis server (FreeRADIUS, EAP-TLS only)
   Intune Cloud PKI)                                                                       └─ Admin panel  https://<ip>:8443
 ```
 
@@ -33,7 +33,7 @@ Laptops join only with a certificate from Intune Cloud PKI. Passwords and MAC fi
 |---|---|
 | **Offices** | Add each office's public IPs. Each office gets its own generated secret. **Aruba config** shows the ready-to-paste CLI |
 | **Devices → Add laptop** | Gives that laptop its own certificate. Send the user the **one-time install link**, or download the **installer** yourself |
-| **Certificates** | Server certificates and the RADIUS root. Optional: upload Intune Cloud PKI CAs |
+| **Certificates** | Server certificates and the Redis root. Optional: upload Intune Cloud PKI CAs |
 | **Dashboard** | Setup checklist, status, logins in the last 24h, certificate expiry |
 | **Logins / Devices** | Who connected or was rejected and why. **Remove** or **Block** a laptop with one click |
 | **Settings** | SSID, admin account, extra admin IPs, verbose logging, **Intune connection** (read-only: user, model, serial, OS, compliance per laptop) |
@@ -49,7 +49,7 @@ Every change is checked with `radiusd -C` before it goes live. If the check fail
 
 ## Optional: Intune instead of install links
 
-1. **Trusted certificate:** `RADIUS-Root-CA.cer` (from the Certificates page)
+1. **Trusted certificate:** `Redis-Root-CA.cer` (from the Certificates page)
 2. **Trusted certificate:** the Cloud PKI root
 3. **SCEP certificate:**
    - Device type, subject `CN={{DeviceName}}`, SAN DNS `{{DeviceName}}`
@@ -57,7 +57,7 @@ Every change is checked with `radiusd -C` before it goes live. If the check fail
    - Root = profile 2, URL = the Cloud PKI SCEP URI
 4. **Wi-Fi (Enterprise):**
    - Your SSID, EAP-TLS
-   - Server name = the RADIUS server name on the Certificates page
+   - Server name = the Redis server name on the Certificates page
    - Server root = profile 1, client certificate = profile 3
    - Machine authentication
 
@@ -66,9 +66,9 @@ Every change is checked with `radiusd -C` before it goes live. If the check fail
 | Layer | What it stops |
 |---|---|
 | Security Group: office IPs only | Everyone else never reaches the server |
-| Per-office RADIUS clients and secrets, Message-Authenticator required | Forged or foreign RADIUS requests (BlastRADIUS) |
+| Per-office Redis clients and secrets, Message-Authenticator required | Forged or foreign Redis requests (BlastRADIUS) |
 | EAP-TLS only, laptop certificate must chain to the uploaded CAs | Personal devices, stolen passwords, rogue certificates |
-| Laptop checks the RADIUS server certificate and name | Fake access points |
+| Laptop checks the Redis server certificate and name | Fake access points |
 | Block list | Lost or stolen laptops |
 | Panel: HTTPS, its own office-IP check, hashed password, lockout after 5 failures, setup code, lockout guard | Panel takeover |
 
@@ -77,6 +77,6 @@ Every change is checked with `radiusd -C` before it goes live. If the check fail
 | Task | How |
 |---|---|
 | Back up | Copy `/opt/wifi-radius/data/panel/`. It holds all settings, keys and the block list |
-| Update the code | `cd /opt/wifi-radius && sudo git pull && sudo docker compose up -d --build` |
+| Update the code | `cd /opt/wifi-radius && sudo git pull && sudo docker compose up -d --build --remove-orphans` |
 | Office IP changed | Update the Security Group **first**, then the Offices page |
 | Forgot the admin password | `cd /opt/wifi-radius && sudo docker compose exec panel python3 reset_admin.py` prints a new one |

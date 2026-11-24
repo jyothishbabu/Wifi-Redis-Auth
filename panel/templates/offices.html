@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block body %}
 <div class="card">
-  <h2>Offices (RADIUS clients)</h2>
-  <p class="muted">Each office's Aruba virtual controller sends RADIUS from the office's public IP, with its own shared secret.
+  <h2>Offices (Redis clients)</h2>
+  <p class="muted">Each office's Aruba virtual controller sends Redis from the office's public IP, with its own shared secret.
   This list also decides which IPs can open this admin panel.</p>
   <div class="flash info">After changing an IP, also update the <b>AWS Security Group</b> (UDP 1812/1813 and TCP 8443).
   After changing a secret, re-apply that office's <b>Aruba config</b>. Until you do, that office's Wi-Fi logins fail.</div>

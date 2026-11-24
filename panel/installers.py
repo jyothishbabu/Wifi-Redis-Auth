@@ -1,4 +1,4 @@
-"""One-file Wi-Fi installers for a laptop: its certificate, the RADIUS root CA and an
+"""One-file Wi-Fi installers for a laptop: its certificate, the Redis root CA and an
 EAP-TLS Wi-Fi profile, bundled so the user installs everything in one step.
 
 - Windows: a .cmd file. Double-click, approve the admin prompt, done.
@@ -132,9 +132,9 @@ def windows_installer(device, ssid, server_name, root_der, pfx, pfx_password):
 
 
 def mac_profile(device, ssid, server_name, root_der, pfx, pfx_password):
-    """Apple configuration profile: RADIUS root + device identity + EAP-TLS Wi-Fi network."""
+    """Apple configuration profile: Redis root + device identity + EAP-TLS Wi-Fi network."""
     ids = {k: str(uuid.uuid4()).upper() for k in ("top", "root", "id", "wifi")}
-    base = "local.wifi-radius"
+    base = "local.wifi-redis"
 
     def payload(kind, ptype, name, **extra):
         return {"PayloadType": ptype, "PayloadVersion": 1, "PayloadUUID": ids[kind],
@@ -142,7 +142,7 @@ def mac_profile(device, ssid, server_name, root_der, pfx, pfx_password):
 
     content = [
         payload("root", "com.apple.security.root", "Wi-Fi server root CA",
-                PayloadContent=root_der, PayloadCertificateFileName="RADIUS-Root-CA.cer"),
+                PayloadContent=root_der, PayloadCertificateFileName="Redis-Root-CA.cer"),
         payload("id", "com.apple.security.pkcs12", f"Wi-Fi certificate {device}",
                 PayloadContent=pfx, PayloadCertificateFileName=f"{device}.pfx", Password=pfx_password),
         payload("wifi", "com.apple.wifi.managed", f"{ssid}",

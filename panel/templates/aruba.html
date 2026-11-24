@@ -3,7 +3,7 @@
 <div class="card">
   <h2>Aruba config for {{ o.name }}</h2>
   <p class="muted">On that office's AP-635 virtual controller: <code>ssh admin@&lt;VC-IP&gt;</code>, then <code>configure terminal</code>, then paste.
-    Replace the two &lt;…&gt; values. This page shows the office's RADIUS secret, so don't share a screenshot of it.</p>
+    Replace the two &lt;…&gt; values. This page shows the office's Redis secret, so don't share a screenshot of it.</p>
   <pre class="mono" id="aruba-cli">! {{ ssid }} - Aruba Instant virtual controller config for {{ o.name }}
 
 ! 1. Virtual controller IP (needed by dynamic-radius-proxy). Skip if already set.

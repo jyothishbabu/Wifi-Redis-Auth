@@ -10,7 +10,7 @@
     <form method="post" action="{{ url_for('remove_trusted') }}" class="right" data-confirm="Remove this CA? Laptops with certificates from it will be rejected.">
       <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="fp" value="{{ c.fp }}">
       <button class="small danger">Remove</button></form>
-  {% else %}<div class="flash error">No laptop CA yet. Add a laptop on the Devices page (or upload Intune CAs). RADIUS starts after that.</div>{% endfor %}
+  {% else %}<div class="flash error">No laptop CA yet. Add a laptop on the Devices page (or upload Intune CAs). Redis starts after that.</div>{% endfor %}
   {% if 'TEST' in (trusted|map(attribute='subject')|join(' '))|upper %}<div class="flash error">A TEST CA is trusted. Remove it before go-live.</div>{% endif %}
   <form method="post" action="{{ url_for('upload_trusted') }}" enctype="multipart/form-data" class="filters">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -20,20 +20,20 @@
 </div>
 
 <div class="card">
-  <h2>2. RADIUS server certificate</h2>
+  <h2>2. Redis server certificate</h2>
   <p class="muted">Laptops check this certificate before they send theirs, so a fake access point can't impersonate the server.</p>
   {% if server %}{% with c = server %}{% include "_cert.html" %}{% endwith %}{% endif %}
   {% if root %}
-  <h2>RADIUS root CA (upload to Intune as a "Trusted certificate" profile)</h2>
+  <h2>Redis root CA (upload to Intune as a "Trusted certificate" profile)</h2>
   {% with c = root %}{% include "_cert.html" %}{% endwith %}
-  <p><a class="button" href="{{ url_for('download_root') }}">Download RADIUS-Root-CA.cer</a></p>
+  <p><a class="button" href="{{ url_for('download_root') }}">Download Redis-Root-CA.cer</a></p>
   <table class="cert"><tr><th>Intune Wi-Fi profile</th><td>Certificate server names: <b class="mono">{{ s.server_name }}</b> · Root certificates for server validation: the profile with this .cer</td></tr></table>
   {% endif %}
 
   <details>
     <summary>Generate a new server certificate</summary>
     <form method="post" action="{{ url_for('regen_server') }}" class="filters"
-          data-confirm="Replace the RADIUS server certificate? Same root CA, so Intune needs no new trusted certificate (unless you change the name).">
+          data-confirm="Replace the Redis server certificate? Same root CA, so Intune needs no new trusted certificate (unless you change the name).">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input name="server_name" value="{{ s.server_name }}" required>
       <button>Generate</button>

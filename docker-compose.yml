@@ -1,10 +1,10 @@
 # Everything is configured in the admin panel: https://<server-ip>:8443
 # First start prints a one-time setup code:  sudo docker compose logs panel
 services:
-  radius:
+  redis:
     build: .
-    image: wifi-radius:latest
-    container_name: wifi-radius
+    image: wifi-redis:latest
+    container_name: wifi-redis
     restart: unless-stopped
     # Host networking (Linux/EC2): FreeRADIUS sees the real office source IPs,
     # so the per-office client restriction is reliable. UDP 1812 auth, 1813 accounting.
@@ -19,8 +19,8 @@ services:
 
   panel:
     build: ./panel
-    image: wifi-radius-panel:latest
-    container_name: wifi-radius-panel
+    image: wifi-redis-panel:latest
+    container_name: wifi-redis-panel
     restart: unless-stopped
     # HTTPS on 8443. Reachable only from office IPs: the AWS Security Group allows
     # TCP 8443 from them, and the panel itself refuses any other source IP.

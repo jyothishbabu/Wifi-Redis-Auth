@@ -9,7 +9,7 @@
     <input name="extra_ips" value="{{ s.extra_ips|join(' ') }}" placeholder="e.g. a VPN exit IP">
     <span class="muted">You are connecting from {{ my_ip }}.</span></label>
   <label class="check"><input type="checkbox" name="debug" {{ 'checked' if s.debug }}>
-    Verbose RADIUS logging (for troubleshooting a laptop; read it under Configuration → RADIUS server log)</label>
+    Verbose Redis logging (for troubleshooting a laptop; read it under Configuration → Redis server log)</label>
   <div><button>Save</button></div>
 </form>
 
@@ -35,7 +35,7 @@
   <details {{ '' if intune_on else 'open' }}>
     <summary>How to get these values (5 minutes, once)</summary>
     <ol>
-      <li>entra.microsoft.com → <b>App registrations → New registration</b>. Name it <code>Wi-Fi RADIUS panel</code>, single tenant, no redirect URI → Register.</li>
+      <li>entra.microsoft.com → <b>App registrations → New registration</b>. Name it <code>Wi-Fi Redis panel</code>, single tenant, no redirect URI → Register.</li>
       <li>On its Overview page, copy the <b>Application (client) ID</b> and the <b>Directory (tenant) ID</b>.</li>
       <li><b>API permissions → Add a permission → Microsoft Graph → Application permissions</b> →
         <code>DeviceManagementManagedDevices.Read.All</code> → Add, then <b>Grant admin consent</b>.</li>

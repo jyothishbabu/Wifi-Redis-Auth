@@ -17,13 +17,13 @@
   <label>Password again <input name="confirm" type="password" required minlength="12" autocomplete="new-password"></label>
 
   <h2>First office</h2>
-  <p class="muted">Its access points may use RADIUS, and only office IPs can open this panel.
+  <p class="muted">Its access points may use Redis, and only office IPs can open this panel.
     The IP below is the address you are connecting from now. Add the other offices later on the Offices page.</p>
   <label>Office name <input name="office" value="{{ form.office }}" required></label>
   <label>Office public IPs (comma or space separated, if the office has more than one) <input name="ip" value="{{ form.ip }}" required></label>
 
   <h2>Server</h2>
-  <label>RADIUS server name (laptops check this name; it needs no DNS) <input name="server_name" value="{{ form.server_name }}" required></label>
+  <label>Redis server name (laptops check this name; it needs no DNS) <input name="server_name" value="{{ form.server_name }}" required></label>
   <label>Panel address (this server's public IP or DNS name) <input name="panel_host" value="{{ form.panel_host }}" required></label>
 
   <button>Finish setup</button>
