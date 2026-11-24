@@ -3,6 +3,7 @@
 <form method="post" action="{{ url_for('save_general') }}" class="card form">
   <h2>General</h2>
   <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>App name (shown in the header and on the login page) <input name="app_name" value="{{ app_name }}" maxlength="40"></label>
   <label>SSID name <input name="ssid" value="{{ s.ssid }}" required maxlength="32"></label>
   <label>Extra IPs allowed to open this panel (besides office IPs), space separated
     <input name="extra_ips" value="{{ s.extra_ips|join(' ') }}" placeholder="e.g. a VPN exit IP">

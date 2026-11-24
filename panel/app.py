@@ -100,7 +100,7 @@ def gen_secret():
 # ================================================================ settings
 DEFAULTS = {"configured": False, "ssid": "", "admin": {"user": "", "hash": ""}, "offices": [],
             "extra_ips": [], "debug": False, "server_name": "radius.wifi.internal", "panel_host": "",
-            "intune": {}}
+            "intune": {}, "app_name": "WiFi RADIUS Authenticator"}
 
 
 def get_settings():
@@ -530,7 +530,9 @@ def headers(resp):
 def inject():
     if "csrf" not in session:
         session["csrf"] = secrets.token_urlsafe(24)
-    return {"csrf": session["csrf"], "user": session.get("user"), "ssid": get_settings()["ssid"] or "Wi-Fi",
+    st = get_settings()
+    return {"csrf": session["csrf"], "user": session.get("user"), "ssid": st["ssid"] or "Wi-Fi",
+            "app_name": st["app_name"] or "WiFi RADIUS Authenticator",
             "intune": INTUNE.lookup, "intune_on": INTUNE.enabled()}
 
 
@@ -1178,6 +1180,7 @@ def settings_page():
 @login_required
 def save_general():
     ssid = request.form.get("ssid", "").strip()
+    app_name = " ".join(request.form.get("app_name", "").split())[:40] or "WiFi RADIUS Authenticator"
     extra = request.form.get("extra_ips", "").replace(",", " ").split()
     debug = request.form.get("debug") == "on"
     errors = []
@@ -1195,12 +1198,12 @@ def save_general():
         return redirect(url_for("settings_page"))
     with lock:
         new = get_settings()
-        new.update(ssid=ssid, extra_ips=extra, debug=debug)
+        new.update(ssid=ssid, extra_ips=extra, debug=debug, app_name=app_name)
         if not guard_lockout(new):
             return redirect(url_for("settings_page"))
         save_settings(new)
         apply_config("settings")
-    audit("save settings", f"ssid={ssid} extra_ips={' '.join(extra)} debug={debug}")
+    audit("save settings", f"name={app_name} ssid={ssid} extra_ips={' '.join(extra)} debug={debug}")
     flash("Settings saved.", "ok")
     return redirect(url_for("settings_page"))
 
