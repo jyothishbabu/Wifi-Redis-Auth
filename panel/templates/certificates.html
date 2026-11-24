@@ -1,15 +1,16 @@
 {% extends "base.html" %}
 {% block body %}
 <div class="card">
-  <h2>1. Trusted laptop CAs (Intune Cloud PKI)</h2>
+  <h2>1. Trusted laptop CAs</h2>
   <p class="muted">Only laptops whose certificate was issued by one of these CAs can join {{ ssid }}.
-    In Intune: Tenant administration → Cloud PKI → open the root CA → Download, then the same for the issuing CA. Upload both here.</p>
+    The panel's own <b>Device CA</b> appears here after you add the first laptop on the Devices page.
+    Optional: if you also use Intune Cloud PKI, upload its root and issuing CA here (Cloud PKI → each CA → Download).</p>
   {% for c in trusted %}
     {% include "_cert.html" %}
     <form method="post" action="{{ url_for('remove_trusted') }}" class="right" data-confirm="Remove this CA? Laptops with certificates from it will be rejected.">
       <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="fp" value="{{ c.fp }}">
       <button class="small danger">Remove</button></form>
-  {% else %}<div class="flash error">No laptop CA yet. RADIUS can't start until you upload one.</div>{% endfor %}
+  {% else %}<div class="flash error">No laptop CA yet. Add a laptop on the Devices page (or upload Intune CAs). RADIUS starts after that.</div>{% endfor %}
   {% if 'TEST' in (trusted|map(attribute='subject')|join(' '))|upper %}<div class="flash error">A TEST CA is trusted. Remove it before go-live.</div>{% endif %}
   <form method="post" action="{{ url_for('upload_trusted') }}" enctype="multipart/form-data" class="filters">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -62,49 +63,4 @@
   </form>
 </div>
 
-<div class="card">
-  <h2>4. Test a laptop before Intune</h2>
-  <p class="muted">Creates a 30-day certificate for one laptop, signed by a separate TEST CA that RADIUS trusts while it exists.
-    Install it by hand (steps below), connect, and check the Logins page. <b>Remove the test CA before go-live.</b></p>
-  <form method="post" action="{{ url_for('issue_test') }}" class="filters">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input name="device" value="TEST-LAPTOP" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}">
-    <input name="password" type="password" minlength="8" required placeholder="Password for the .pfx file" autocomplete="new-password">
-    <button name="format" value="pfx">Windows: download .pfx</button>
-    <button name="format" value="mobileconfig">Mac / iPhone: download .mobileconfig</button>
-  </form>
-  {% if test_active %}
-  <form method="post" action="{{ url_for('remove_test') }}" data-confirm="Remove the test CA? Every test certificate stops working.">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">Remove test CA (do this before go-live)</button></form>
-  {% endif %}
-  <details>
-    <summary>How to set up a Windows laptop by hand</summary>
-    <ol>
-      <li>Download <b>RADIUS-Root-CA.cer</b> (section 2) and the test <b>.pfx</b> above, and copy both to the laptop.</li>
-      <li>Double-click <b>RADIUS-Root-CA.cer</b> → Install Certificate → <b>Local Machine</b> → Place in <b>Trusted Root Certification Authorities</b>.</li>
-      <li>Double-click the <b>.pfx</b> → <b>Current User</b> → enter its password → Automatically select the store.</li>
-      <li>Control Panel → Network and Sharing Center → Set up a new connection → <b>Manually connect to a wireless network</b>:
-        Network name <b>{{ ssid }}</b>, Security <b>WPA2-Enterprise</b>, Encryption <b>AES</b> → Next → <b>Change connection settings</b>.</li>
-      <li>Security tab → method <b>Microsoft: Smart Card or other certificate</b> → Settings:
-        <b>Use a certificate on this computer</b>; tick <b>Verify the server's identity</b>; Connect to these servers: <b class="mono">{{ s.server_name }}</b>;
-        Trusted Root: tick <b>{{ root.subject if root else 'the RADIUS root' }}</b> → OK.</li>
-      <li>Advanced settings → 802.1X → tick Specify authentication mode → <b>User authentication</b> → OK.</li>
-      <li>Connect to {{ ssid }}. If Windows asks which certificate, pick the test one. It must not ask for a password.</li>
-    </ol>
-    <p class="muted">Before installing Intune profiles on this laptop later, delete this manual Wi-Fi network and the test certificate (certmgr.msc → Personal).</p>
-  </details>
-  <details>
-    <summary>How to set up a Mac (or iPhone / iPad)</summary>
-    <ol>
-      <li>Download the <b>.mobileconfig</b> above and open it on the Mac (AirDrop or email it to an iPhone).</li>
-      <li>macOS: <b>System Settings → General → Device Management</b> (older macOS: Privacy &amp; Security → Profiles) →
-        double-click the downloaded profile → <b>Install</b>. iPhone: Settings → <b>Profile Downloaded</b> → Install.</li>
-      <li>Enter the <b>.pfx password</b> you chose when asked, then your Mac login password.
-        The profile shows "Unverified": that is expected for a test profile.</li>
-      <li>Choose <b>{{ ssid }}</b> from the Wi-Fi menu. It connects with no username or password.
-        If macOS asks which certificate to use, pick the TEST one.</li>
-      <li>Remove after testing: Device Management → select the profile → <b>−</b> (minus). This deletes the certificate and the network.</li>
-    </ol>
-  </details>
-</div>
 {% endblock %}

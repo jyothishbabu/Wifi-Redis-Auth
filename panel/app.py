@@ -7,6 +7,7 @@ if `radiusd -C` passes. No .env file is used.
 """
 import csv
 import datetime as dt
+import hashlib
 import hmac
 import io
 import ipaddress
@@ -21,6 +22,8 @@ import time
 import uuid
 from functools import wraps
 
+from installers import mac_profile, windows_installer
+
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -34,7 +37,8 @@ DATA = os.environ.get("PANEL_DATA", "/data")
 P_DIR, CFG_DIR = f"{DATA}/panel", f"{DATA}/config"
 LOG_DIR, CTL_DIR = f"{DATA}/logs", f"{DATA}/control"
 CA_DIR, TLS_DIR, TRUST_DIR = f"{P_DIR}/ca", f"{P_DIR}/tls", f"{P_DIR}/trusted"
-TEST_DIR = f"{P_DIR}/testca"
+DEVCA_DIR = f"{P_DIR}/deviceca"
+DEVICES = f"{P_DIR}/devices.json"
 SETTINGS, BLOCKED, AUDIT = f"{P_DIR}/settings.json", f"{P_DIR}/blocked.json", f"{P_DIR}/audit.log"
 SETUP_CODE = f"{P_DIR}/setup-code"
 
@@ -47,11 +51,12 @@ SECRET_RE = re.compile(r"^[A-Za-z0-9!#%&()*+,./:;<=>?@^_|~-]{16,128}$")
 FIELDS = ["ts", "result", "src", "office", "user", "cn", "mac", "nas", "ssid", "ap", "reason"]
 SESSION_IDLE = 30 * 60
 MAX_FAILS, LOCK_SECS = 5, 15 * 60
+LINK_DAYS, CERT_DAYS = 7, 365
 MAX_UPLOAD = 256 * 1024
 
 lock = threading.Lock()
 fails = {}  # ip -> [count, first_fail_ts]
-for d in (P_DIR, CFG_DIR, CTL_DIR, CA_DIR, TLS_DIR, TRUST_DIR, TEST_DIR):
+for d in (P_DIR, CFG_DIR, CTL_DIR, CA_DIR, TLS_DIR, TRUST_DIR, DEVCA_DIR):
     os.makedirs(d, exist_ok=True)
 
 
@@ -224,89 +229,91 @@ def generate_panel_cert(host):
     atomic_write(f"{TLS_DIR}/panel.pem", pem_cert(c) + (pem_cert(ca_cert) if ca_cert else b""))
 
 
-TEST_CA_CN = "TEST Wi-Fi Laptop CA (remove before go-live)"
-
-
-def test_ca():
-    """CA used only for manual test certificates. It is trusted while it exists."""
-    c, k = read_bytes(f"{TEST_DIR}/ca.pem"), read_bytes(f"{TEST_DIR}/ca.key")
+# ---------------------------------------------------------------- device certificates
+def device_ca(label):
+    """The panel's own CA for laptop certificates. Trusted by RADIUS while it exists."""
+    c, k = read_bytes(f"{DEVCA_DIR}/ca.pem"), read_bytes(f"{DEVCA_DIR}/ca.key")
     if c and k:
         return x509.load_pem_x509_certificate(c), serialization.load_pem_private_key(k, None)
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    n = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, TEST_CA_CN)])
+    key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    n = x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, label),
+                   x509.NameAttribute(NameOID.COMMON_NAME, f"{label} Device CA")])
     now = utcnow()
     cert = (x509.CertificateBuilder().subject_name(n).issuer_name(n).public_key(key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(now - dt.timedelta(minutes=5)).not_valid_after(now + dt.timedelta(days=90))
+            .not_valid_before(now - dt.timedelta(minutes=5)).not_valid_after(now + dt.timedelta(days=3650))
             .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
             .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
             .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
             .sign(key, hashes.SHA256()))
-    atomic_write(f"{TEST_DIR}/ca.key", pem_key(key), 0o600)
-    atomic_write(f"{TEST_DIR}/ca.pem", pem_cert(cert))
+    atomic_write(f"{DEVCA_DIR}/ca.key", pem_key(key), 0o600)
+    atomic_write(f"{DEVCA_DIR}/ca.pem", pem_cert(cert))
     atomic_write(f"{TRUST_DIR}/{fingerprint(cert)}.pem", pem_cert(cert))
     return cert, key
 
 
-def issue_test_client(device, password):
-    """30-day client certificate for one test laptop, as a Windows-compatible .pfx."""
-    ca_cert, ca_key = test_ca()
+def issue_device_cert(device, label):
+    """New key + 1-year client certificate for one laptop, as a Windows/macOS-compatible .pfx.
+    The private key is never stored on the server."""
+    ca_cert, ca_key = device_ca(label)
     k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = utcnow()
     c = (x509.CertificateBuilder()
          .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, device)]))
          .issuer_name(ca_cert.subject).public_key(k.public_key()).serial_number(x509.random_serial_number())
-         .not_valid_before(now - dt.timedelta(minutes=5)).not_valid_after(now + dt.timedelta(days=30))
+         .not_valid_before(now - dt.timedelta(minutes=5)).not_valid_after(now + dt.timedelta(days=CERT_DAYS))
          .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
          .add_extension(x509.KeyUsage(True, False, True, False, False, False, False, False, False), critical=True)
          .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
          .add_extension(x509.SubjectAlternativeName([x509.DNSName(device)]), critical=False)
          .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()), critical=False)
          .sign(ca_key, hashes.SHA256()))
+    password = secrets.token_urlsafe(18)
     # Legacy 3DES/SHA1 PKCS#12 so every Windows and macOS version can import it.
     enc = (serialization.PrivateFormat.PKCS12.encryption_builder().kdf_rounds(50000)
            .key_cert_algorithm(pkcs12.PBES.PBESv1SHA1And3KeyTripleDESCBC).hmac_hash(hashes.SHA1())
            .build(password.encode()))
-    return pkcs12.serialize_key_and_certificates(device.encode(), k, c, [ca_cert], enc)
+    pfx = pkcs12.serialize_key_and_certificates(device.encode(), k, c, [ca_cert], enc)
+    return pfx, password, c
 
 
-def mac_test_profile(device, pfx, ssid, server_name, root_der):
-    """Apple configuration profile: RADIUS root + test identity + EAP-TLS Wi-Fi network."""
-    ids = {k: str(uuid.uuid4()).upper() for k in ("top", "root", "id", "wifi")}
-    base = "local.wifi-radius.test"
-
-    def payload(kind, ptype, name, **extra):
-        return {"PayloadType": ptype, "PayloadVersion": 1, "PayloadUUID": ids[kind],
-                "PayloadIdentifier": f"{base}.{kind}.{ids[kind]}", "PayloadDisplayName": name, **extra}
-
-    content = [
-        payload("root", "com.apple.security.root", "RADIUS Root CA",
-                PayloadContent=root_der, PayloadCertificateFileName="RADIUS-Root-CA.cer"),
-        payload("id", "com.apple.security.pkcs12", f"TEST certificate {device}",
-                PayloadContent=pfx, PayloadCertificateFileName=f"{device}.pfx"),
-        payload("wifi", "com.apple.wifi.managed", f"{ssid} (EAP-TLS)",
-                SSID_STR=ssid, HIDDEN_NETWORK=False, AutoJoin=True, EncryptionType="WPA2",
-                IsHotspot=False, ProxyType="None", PayloadCertificateUUID=ids["id"],
-                EAPClientConfiguration={"AcceptEAPTypes": [13], "UserName": device,
-                                        "TLSTrustedServerNames": [server_name],
-                                        "PayloadCertificateAnchorUUID": [ids["root"]]}),
-    ]
-    top = {"PayloadType": "Configuration", "PayloadVersion": 1, "PayloadUUID": ids["top"],
-           "PayloadIdentifier": f"{base}.{ids['top']}", "PayloadDisplayName": f"{ssid} Wi-Fi TEST ({device})",
-           "PayloadDescription": "Test certificate and Wi-Fi settings. Remove after testing.",
-           "PayloadRemovalDisallowed": False, "PayloadContent": content}
-    return plistlib.dumps(top)
+def get_devices():
+    return load_json(DEVICES, [])
 
 
-def remove_test_ca():
-    c = read_bytes(f"{TEST_DIR}/ca.pem")
-    if c:
-        fp = fingerprint(x509.load_pem_x509_certificate(c))
-        if os.path.exists(f"{TRUST_DIR}/{fp}.pem"):
-            os.remove(f"{TRUST_DIR}/{fp}.pem")
-    for f in ("ca.pem", "ca.key"):
-        if os.path.exists(f"{TEST_DIR}/{f}"):
-            os.remove(f"{TEST_DIR}/{f}")
+def save_devices(d):
+    atomic_write(DEVICES, json.dumps(d, indent=2), 0o600)
+
+
+def token_hash(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def new_link(dev):
+    token = secrets.token_urlsafe(24)
+    dev.update(token=token_hash(token), token_expires=int(time.time()) + LINK_DAYS * 86400, token_used=False)
+    return token
+
+
+def build_installer(device, fmt):
+    """Issue a fresh certificate and wrap it for the platform. Returns (bytes, filename, mimetype)."""
+    s = get_settings()
+    chain = server_chain()
+    if len(chain) < 2:
+        raise ValueError("The RADIUS server certificate is missing (Certificates page).")
+    root_der = chain[-1].public_bytes(serialization.Encoding.DER)
+    pfx, pw, cert = issue_device_cert(device, s["ssid"] or "Wi-Fi")
+    devs = get_devices()
+    for d in devs:
+        if d["name"] == device:
+            d.setdefault("certs", []).append({"serial": format(cert.serial_number, "x"), "issued": int(time.time()),
+                                              "expires": int(cert.not_valid_after_utc.timestamp()), "format": fmt})
+    save_devices(devs)
+    if fmt == "windows":
+        return (windows_installer(device, s["ssid"], s["server_name"], root_der, pfx, pw),
+                f"Install-WiFi-{device}.cmd", "application/octet-stream")
+    return (mac_profile(device, s["ssid"], s["server_name"], root_der, pfx, pw),
+            f"WiFi-{device}.mobileconfig", "application/x-apple-aspen-config")
 
 
 def parse_certs(data):
@@ -445,9 +452,9 @@ def checklist(s):
     public = [ip for o in s["offices"] for ip in o["ips"] if not ipaddress.ip_network(ip, strict=False).is_private]
     return [
         ("RADIUS server certificate", bool(server_chain()), "Certificates page: generate or import it."),
-        ("Laptop CA uploaded (Intune Cloud PKI root + issuing)",
+        ("Laptop certificates ready (add a laptop on the Devices page, or upload Intune CAs)",
          any("TEST" not in c.subject.rfc4514_string().upper() for _, c in cas),
-         "Certificates page: upload the two .cer files downloaded from Intune Cloud PKI."),
+         "Devices page: Add laptop. Or Certificates page: upload the Intune Cloud PKI CAs."),
         ("No TEST CA trusted", not any("TEST" in c.subject.rfc4514_string().upper() for _, c in cas),
          "Certificates page: remove the test CA before go-live."),
         ("At least one office with a public IP", bool(public), "Offices page."),
@@ -768,7 +775,7 @@ def devices():
         d["ok" if r["result"] == "ACCEPT" else "bad"] += 1
     blocked = get_blocked()
     return render_template("devices.html", seen=[d for k, d in seen.items() if k], blocked=blocked,
-                           bnames={b["name"].lower() for b in blocked})
+                           bnames={b["name"].lower() for b in blocked}, laptops=get_devices(), now=time.time())
 
 
 @app.post("/devices/block")
@@ -884,8 +891,7 @@ def certificates():
         "certificates.html", s=get_settings(), server=cert_info(chain[0]) if chain else None,
         root=cert_info(chain[-1]) if len(chain) > 1 else None,
         trusted=[cert_info(c, fp) for fp, c in trusted_cas()],
-        panel=cert_info(panel[0]) if panel else None, has_ca_key=ca_key is not None,
-        test_active=os.path.exists(f"{TEST_DIR}/ca.pem"))
+        panel=cert_info(panel[0]) if panel else None, has_ca_key=ca_key is not None)
 
 
 @app.post("/certificates/trusted/upload")
@@ -994,45 +1000,123 @@ def import_server():
     return redirect(url_for("certificates"))
 
 
-@app.post("/certificates/test/issue")
-@login_required
-def issue_test():
-    device = request.form.get("device", "").strip()
-    password = request.form.get("password", "")
-    if not DEVICE_RE.match(device):
-        flash("Device name: letters, digits, dot, dash, underscore.", "error")
-        return redirect(url_for("certificates"))
-    if len(password) < 8:
-        flash("Choose a .pfx password of at least 8 characters (you type it when importing).", "error")
-        return redirect(url_for("certificates"))
-    chain = server_chain()
-    if len(chain) < 2:
-        flash("Generate the RADIUS server certificate first (section 2).", "error")
-        return redirect(url_for("certificates"))
-    fmt = request.form.get("format", "pfx")
-    with lock:
-        data = issue_test_client(device, password)
-        apply_config("test certificate")
-    audit("issue test certificate", f"{device} ({fmt})")
-    if fmt == "mobileconfig":
-        s = get_settings()
-        prof = mac_test_profile(device, data, s["ssid"], s["server_name"],
-                                chain[-1].public_bytes(serialization.Encoding.DER))
-        return Response(prof, mimetype="application/x-apple-aspen-config",
-                        headers={"Content-Disposition": f"attachment; filename={device}.mobileconfig"})
-    return Response(data, mimetype="application/x-pkcs12",
-                    headers={"Content-Disposition": f"attachment; filename={device}.pfx"})
+# ---------------------------------------------------------------- laptop enrollment
+def _download(data_name_mime):
+    data, name, mime = data_name_mime
+    return Response(data, mimetype=mime, headers={"Content-Disposition": f"attachment; filename={name}"})
 
 
-@app.post("/certificates/test/remove")
+@app.post("/devices/add")
 @login_required
-def remove_test():
+def add_device():
+    name = request.form.get("name", "").strip()
+    note = request.form.get("note", "").strip()[:100].replace("\t", " ").replace("\n", " ")
+    if not DEVICE_RE.match(name):
+        flash("Laptop name: letters, digits, dot, dash, underscore (e.g. LT-042 or anna-macbook).", "error")
+        return redirect(url_for("devices"))
     with lock:
-        remove_test_ca()
-        apply_config("test CA removed")
-    audit("remove test CA")
-    flash("Test CA removed. Test certificates no longer work.", "ok")
-    return redirect(url_for("certificates"))
+        devs = get_devices()
+        if any(d["name"].lower() == name.lower() for d in devs):
+            flash(f"{name} already exists. Use 'New install link' on it instead.", "error")
+            return redirect(url_for("devices"))
+        dev = {"name": name, "note": note, "created": int(time.time()), "by": session["user"], "certs": []}
+        token = new_link(dev)
+        devs.append(dev)
+        save_devices(devs)
+    audit("add laptop", f"{name} {note}")
+    return render_template("enroll_link.html", dev=dev, link=enroll_url(token))
+
+
+def enroll_url(token):
+    host = get_settings()["panel_host"] or request.host.rsplit(":", 1)[0]
+    return f"https://{host}:8443/enroll/{token}"
+
+
+@app.post("/devices/<name>/link")
+@login_required
+def device_link(name):
+    with lock:
+        devs = get_devices()
+        dev = next((d for d in devs if d["name"] == name), None)
+        if not dev:
+            abort(404)
+        token = new_link(dev)
+        save_devices(devs)
+    audit("new install link", name)
+    return render_template("enroll_link.html", dev=dev, link=enroll_url(token))
+
+
+@app.post("/devices/<name>/download")
+@login_required
+def device_download(name):
+    fmt = request.form.get("format")
+    if fmt not in ("windows", "mac") or not any(d["name"] == name for d in get_devices()):
+        abort(400)
+    try:
+        with lock:
+            out = build_installer(name, fmt)
+            apply_config("device certificate")
+    except ValueError as e:
+        flash(str(e), "error")
+        return redirect(url_for("devices"))
+    audit("download installer", f"{name} ({fmt})")
+    return _download(out)
+
+
+@app.post("/devices/<name>/remove")
+@login_required
+def device_remove(name):
+    with lock:
+        save_devices([d for d in get_devices() if d["name"] != name])
+        b = get_blocked()
+        if name.lower() not in {x["name"].lower() for x in b}:
+            b.append({"name": name, "note": "laptop removed", "by": session["user"], "at": int(time.time())})
+            atomic_write(BLOCKED, json.dumps(b, indent=2))
+        apply_config(f"remove laptop {name}")
+    audit("remove laptop", name)
+    flash(f"{name} removed and blocked. Its certificate no longer connects.", "ok")
+    return redirect(url_for("devices"))
+
+
+def find_token(token):
+    h = token_hash(token)
+    for d in get_devices():
+        if d.get("token") and hmac.compare_digest(d["token"], h):
+            if d.get("token_used") or time.time() > d.get("token_expires", 0):
+                return d, "This install link was already used or has expired. Ask IT for a new one."
+            return d, None
+    return None, "This install link is not valid. Ask IT for a new one."
+
+
+@app.route("/enroll/<token>", methods=["GET", "POST"])
+def enroll(token):
+    if throttled(client_ip()):
+        abort(429)
+    dev, problem = find_token(token)
+    if not dev:
+        record_fail(client_ip())
+    if problem or request.method == "GET":
+        return render_template("enroll.html", dev=dev, problem=problem, token=token)
+    fmt = request.form.get("format")
+    if fmt not in ("windows", "mac"):
+        abort(400)
+    try:
+        with lock:
+            dev, problem = find_token(token)  # re-check under the lock: one download per link
+            if problem:
+                return render_template("enroll.html", dev=dev, problem=problem, token=token)
+            out = build_installer(dev["name"], fmt)
+            devs = get_devices()
+            for d in devs:
+                if d["name"] == dev["name"]:
+                    d["token_used"] = True
+            save_devices(devs)
+            apply_config("device certificate")
+    except ValueError as e:
+        return render_template("enroll.html", dev=dev, problem=str(e), token=token)
+    with open(AUDIT, "a") as f:
+        f.write(f"{int(time.time())}\t(install link)\t{client_ip()}\tlaptop installed\t{dev['name']} ({fmt})\n")
+    return _download(out)
 
 
 @app.route("/certificates/root-ca.cer")

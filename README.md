@@ -31,16 +31,23 @@ Laptops join only with a certificate from Intune Cloud PKI. Passwords and MAC fi
 
 | Page | What to do |
 |---|---|
-| **Certificates** | Upload the Intune Cloud PKI **root and issuing CA** (Intune → Tenant administration → Cloud PKI → each CA → Download). **Download RADIUS-Root-CA.cer** for Intune. |
-| **Offices** | Add each office's public IP. Each gets its own generated secret. **Aruba config** shows the ready-to-paste CLI for that office. |
-| **Dashboard** | The setup checklist shows what is left. Also: status, logins in the last 24h, certificate expiry. |
-| **Logins / Devices** | Who connected or was rejected and why. Block or unblock a laptop with one click. |
-| **Settings** | SSID, admin username and password, extra admin IPs, verbose RADIUS logging. |
-| **Logs & config** | RADIUS log, generated config, and an audit log of every admin action. |
+| **Offices** | Add each office's public IPs. Each office gets its own generated secret. **Aruba config** shows the ready-to-paste CLI |
+| **Devices → Add laptop** | Gives that laptop its own certificate. Send the user the **one-time install link**, or download the **installer** yourself |
+| **Certificates** | Server certificates and the RADIUS root. Optional: upload Intune Cloud PKI CAs |
+| **Dashboard** | Setup checklist, status, logins in the last 24h, certificate expiry |
+| **Logins / Devices** | Who connected or was rejected and why. **Remove** or **Block** a laptop with one click |
+| **Settings** | SSID, admin account, extra admin IPs, verbose logging |
+
+### Installing a laptop (same idea on Windows and Mac)
+- **Windows:** open `Install-WiFi-<laptop>.cmd` and click **Yes** on the admin prompt. It installs the root, the certificate and the Wi-Fi network for the whole computer.
+- **Mac:** open `WiFi-<laptop>.mobileconfig`, then go to System Settings → General → Device Management → **Install**.
+- iPhone and iPad use the same `.mobileconfig`.
+
+Install links work once, expire after 7 days, and only open from office IPs. Certificates last 1 year; to renew, use "Install link / file" again.
 
 Every change is checked with `radiusd -C` before it goes live. If the check fails, the running config stays and the error shows on the dashboard.
 
-## Intune profiles (assign all four to one device group)
+## Optional: Intune instead of install links
 
 1. **Trusted certificate:** `RADIUS-Root-CA.cer` (from the Certificates page)
 2. **Trusted certificate:** the Cloud PKI root

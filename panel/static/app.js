@@ -38,3 +38,20 @@ document.addEventListener("DOMContentLoaded", () => {
     b.textContent = "Copied";
   }));
 });
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("[data-copy-input]").forEach(b => b.addEventListener("click", async () => {
+    const i = document.getElementById(b.dataset.copyInput);
+    i.select(); await navigator.clipboard.writeText(i.value); b.textContent = "Copied";
+  }));
+  // Enrollment page: make the button for this computer's OS the primary one.
+  const form = document.getElementById("enroll-form");
+  if (form) {
+    const ua = navigator.userAgent, mac = /Mac|iPhone|iPad/.test(ua);
+    form.querySelectorAll("[data-os]").forEach(b => {
+      const mine = (b.dataset.os === "mac") === mac;
+      b.classList.toggle("secondary", !mine);
+      if (mine) form.prepend(b);
+    });
+  }
+});

@@ -83,3 +83,6 @@ label.check { flex-direction: row; align-items: center; gap: 8px; }
 details { margin-top: 12px; } summary { cursor: pointer; color: var(--accent); margin-bottom: 8px; }
 input[type=file] { padding: 5px; }
 ol { padding-left: 20px; }
+h3 { font-size: 14px; margin: 14px 0 6px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 720px) { .two { grid-template-columns: 1fr; } }

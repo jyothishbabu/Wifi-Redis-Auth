@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card setup">
+  <h1>Connect to {{ ssid }}</h1>
+  {% if problem %}
+    <div class="flash error">{{ problem }}</div>
+  {% else %}
+    <p>This sets up <b>{{ dev.name }}</b> to join {{ ssid }} automatically, with no password.
+      Click the button for this computer, then open the downloaded file.</p>
+    <form method="post" class="form" id="enroll-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button name="format" value="windows" data-os="windows">I'm on Windows</button>
+      <button name="format" value="mac" data-os="mac" class="secondary">I'm on a Mac (or iPhone / iPad)</button>
+    </form>
+    <p class="muted">This link works once. Use it on {{ dev.name }} only.</p>
+  {% endif %}
+</div>
+{% if not problem %}{% include "_install_steps.html" %}{% endif %}
+{% endblock %}

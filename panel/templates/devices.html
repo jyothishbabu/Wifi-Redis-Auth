@@ -1,6 +1,37 @@
 {% extends "base.html" %}
 {% block body %}
 <div class="card">
+  <h2>Laptops</h2>
+  <p class="muted">Add a laptop to give it its own Wi-Fi certificate. You get a one-time install link, or an installer file for Windows or Mac.
+    Removing a laptop cuts it off immediately.</p>
+  <form method="post" action="{{ url_for('add_device') }}" class="filters">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="name" placeholder="Laptop name, e.g. LT-042 or anna-macbook" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}">
+    <input name="note" placeholder="Owner / note (optional)" class="wide">
+    <button>Add laptop</button>
+  </form>
+  <div class="scroll"><table>
+  <tr><th>Laptop</th><th>Owner / note</th><th>Certificate</th><th>Install link</th><th></th></tr>
+  {% for d in laptops|sort(attribute='name') %}
+  {% set last = d.certs[-1] if d.certs else None %}
+  <tr>
+    <td><b>{{ d.name }}</b>{% if d.name.lower() in bnames %} <span class="pill bad">blocked</span>{% endif %}</td>
+    <td>{{ d.note }}</td>
+    <td>{% if last %}{{ last.format }} · expires {{ last.expires|when|truncate(10, True, '') }}{% else %}<span class="muted">not installed yet</span>{% endif %}</td>
+    <td>{% if d.token and not d.token_used and d.token_expires > now %}<span class="pill warn">open until {{ d.token_expires|when|truncate(10, True, '') }}</span>
+        {% elif d.token_used %}<span class="muted">used</span>{% else %}<span class="muted">expired</span>{% endif %}</td>
+    <td class="nowrap">
+      <form method="post" action="{{ url_for('device_link', name=d.name) }}" class="inline-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="small secondary">Install link / file</button></form>
+      <form method="post" action="{{ url_for('device_remove', name=d.name) }}" class="inline-form" data-confirm="Remove {{ d.name }}? It is blocked and disconnects at its next login.">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Remove</button></form>
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">No laptops yet.</td></tr>{% endfor %}
+  </table></div>
+</div>
+
+<div class="card">
   <h2>Blocked devices</h2>
   <p class="muted">A blocked laptop is refused even though its certificate is valid. Use the Intune device name (certificate CN). Also retire or wipe the laptop in Intune.</p>
   <form method="post" action="{{ url_for('block_device') }}" class="filters">

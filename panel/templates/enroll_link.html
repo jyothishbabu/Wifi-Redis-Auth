@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>Install {{ ssid }} on {{ dev.name }}</h2>
+  <p>Choose <b>one</b> of these:</p>
+
+  <h3>A. Send the user this link</h3>
+  <p class="muted">They open it <b>on that laptop</b>, while on the office network (wired or guest Wi-Fi).
+    It works once and expires in 7 days.</p>
+  <div class="secret"><input id="enroll-link" value="{{ link }}" readonly>
+    <button type="button" data-copy-input="enroll-link">Copy link</button></div>
+
+  <h3>B. Download the installer yourself</h3>
+  <p class="muted">Run it on the laptop, or give it to the user on a USB stick or share. It contains this laptop's certificate, so delete it after use.</p>
+  <form method="post" action="{{ url_for('device_download', name=dev.name) }}" class="filters">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button name="format" value="windows">Windows installer (.cmd)</button>
+    <button name="format" value="mac">Mac / iPhone profile (.mobileconfig)</button>
+  </form>
+
+  <p><a class="button secondary" href="{{ url_for('devices') }}">Back to devices</a></p>
+</div>
+{% include "_install_steps.html" %}
+{% endblock %}
