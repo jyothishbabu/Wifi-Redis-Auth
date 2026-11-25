@@ -69,7 +69,7 @@ Check these three lines on the virtual controller:
 | `wlan auth-server … key` | The office secret from the panel | "Unresponsive" (the server silently drops the request) |
 | `wlan ssid-profile … opmode` | `wpa2-aes`, not `wpa-aes` | Windows: "The specific network is not available" |
 
-## 4. Put certificates on laptops (two ways)
+## 4. Put certificates on laptops (three ways)
 
 **A. Intune: automatic for every managed laptop** (needs the Intune Suite or Cloud PKI licence)
 1. Intune → Tenant administration → **Cloud PKI**: create a Root CA, then an Issuing CA, both with EKU **Client Authentication**. Download both `.cer` files and copy the Issuing CA's **SCEP URI**.
@@ -86,7 +86,20 @@ Check these three lines on the virtual controller:
 
 4. Pilot 2–3 laptops: all 5 profiles **Succeeded**, then **ACCEPT** on the panel's Logins page. Then add everyone.
 
-**B. Panel: for laptops not in Intune** (Windows or Mac)
+**B. Jamf Pro: automatic for every managed Mac**
+1. Panel → **Jamf** → **Turn on automatic certificates**. The page shows the SCEP URL, the challenge and the CA fingerprint.
+2. Jamf Pro → Computers → **Configuration Profiles** → New. Level **Computer**, Install Automatically. Add three payloads:
+
+   | Payload | Key settings |
+   |---|---|
+   | Certificate | Upload `Redis-Root-CA.cer` |
+   | SCEP | URL from the panel · Subject `CN=$SERIALNUMBER` · Static challenge from the panel · Key size 2048 · digital signature + key encipherment · fingerprint from the panel |
+   | Network | Wi-Fi · your SSID · Auto Join · WPA2 Enterprise · EAP **TLS** · Identity = the SCEP payload · Trust `Redis Root CA` · server name from the panel |
+
+3. Scope it to 2–3 pilot Macs, then to everyone. Each Mac creates its own key, gets its certificate from the panel and joins automatically. It must be on an office network (or a VPN leaving from an office IP) when the profile installs.
+4. Optional: Panel → Jamf → **Jamf Pro inventory** (API client with *Read Computers*). Macs then show their Jamf name, user, model and managed state instead of a serial number.
+
+**C. Panel: for laptops not in Intune or Jamf** (Windows or Mac)
 Panel → **Devices → Add laptop**, then either:
 - Send the **one-time install link**. It works once, lasts 7 days, and opens only from office IPs. Or:
 - Download the **installer** yourself.
@@ -107,7 +120,8 @@ Each installer adds the root, the laptop's own certificate (valid 1 year) and th
 - [ ] Office secrets rotated (Offices → Generate → Save, then re-paste on Aruba) if one was ever shared
 - [ ] Pilot laptops show **ACCEPT** on Logins (Intune and/or installer)
 - [ ] **No TEST CA** under Certificates → Trusted laptop CAs
-- [ ] Intune connected (optional), with a reminder set before its client secret expires
+- [ ] Jamf profile scoped and pilot Macs show ACCEPT (if you use Jamf)
+- [ ] Intune / Jamf inventory connected (optional), with reminders before their client secrets expire
 - [ ] `data/` backed up, and the GitHub repo is **private**
 - [ ] Admin password stored in your password manager
 
@@ -115,7 +129,7 @@ Each installer adds the root, the laptop's own certificate (valid 1 year) and th
 
 | Task | How |
 |---|---|
-| New laptop | Intune: nothing to do. Otherwise: Devices → Add laptop |
+| New laptop | Intune or Jamf: nothing to do. Otherwise: Devices → Add laptop |
 | Lost, stolen or leaving | Devices → **Block** or **Remove**. Takes effect in seconds. Also retire or wipe it in Intune |
 | Who connected | **Logins** (filter, export CSV). Rejected attempts show the reason |
 | Office IP changed | Security Group **first**, then Offices |
@@ -136,7 +150,8 @@ Each installer adds the root, the laptop's own certificate (valid 1 year) and th
 | Logins: REJECT `TLS Alert … unknown CA` | The **laptop** doesn't trust the server | Intune Wi-Fi profile: server name and `Redis-Root-CA.cer` must match the panel |
 | Logins: REJECT `is blocked` | The laptop is on the block list | Devices → Unblock |
 | Dashboard: Redis **waiting** | No trusted laptop CA yet, or a config error | Add a laptop or upload the Intune CAs. The error is shown under the status bar |
-| Device shows as a GUID | The SCEP subject uses a device ID | Connect Intune in Settings. The panel then shows the real name |
+| Device shows as a GUID or serial number | The certificate carries a device ID or serial | Connect Intune (Settings) or Jamf inventory (Jamf page). The panel then shows the real name |
+| Jamf profile fails to install on a Mac | The Mac wasn't on an office network, or the challenge changed | Bring it to the office and use **Redistribute**; after a new challenge, update the SCEP payload |
 
 ## 8. Security
 

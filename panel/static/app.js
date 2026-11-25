@@ -55,3 +55,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 });
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("[data-confirm-click]").forEach(b =>
+    b.addEventListener("click", e => { if (!confirm(b.dataset.confirmClick)) e.preventDefault(); }));
+});

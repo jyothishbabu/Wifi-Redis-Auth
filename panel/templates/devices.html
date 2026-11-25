@@ -53,14 +53,14 @@
 <div class="card">
   <h2>Devices seen</h2>
   <div class="scroll"><table>
-  <tr><th>Device</th>{% if intune_on %}<th>Intune</th><th>OS / last Intune sync</th>{% endif %}<th>Last seen (UTC)</th><th>Last result</th><th>MAC</th><th>Office</th><th>OK / Rejected</th><th></th></tr>
+  <tr><th>Device</th>{% if mdm_on %}<th>Intune / Jamf</th><th>OS / last check-in</th>{% endif %}<th>Last seen (UTC)</th><th>Last result</th><th>MAC</th><th>Office</th><th>OK / Rejected</th><th></th></tr>
   {% for d in seen %}
   <tr>
     <td><b>{{ d.label }}</b>{% if d.name.lower() in bnames %} <span class="pill bad">blocked</span>{% endif %}
       {% if d.label != d.name %}<div class="muted mono small-id">{{ d.name }}</div>{% endif %}</td>
-    {% if intune_on %}{% set i = intune(d.name) or intune(d.label) %}
-    <td>{% with name = d.name, alt = d.label %}{% include "_intune.html" %}{% endwith %}</td>
-    <td>{% if i %}{{ i.operatingSystem }} {{ i.osVersion }}<div class="muted">{{ (i.lastSyncDateTime or '')[:16]|replace('T', ' ') }}</div>{% endif %}</td>
+    {% if mdm_on %}{% set i = mdm(d.name) or mdm(d.label) %}
+    <td>{% with name = d.name, alt = d.label %}{% include "_mdm.html" %}{% endwith %}</td>
+    <td>{% if i %}{{ i.os }}<div class="muted">{{ (i.last_sync or '')[:16]|replace('T', ' ') }}</div>{% endif %}</td>
     {% endif %}
     <td class="nowrap">{{ d.last|when }}</td>
     <td><span class="pill {{ 'ok' if d.result == 'ACCEPT' else 'bad' }}">{{ d.result }}</span>

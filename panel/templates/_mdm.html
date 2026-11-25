@@ -1,0 +1,11 @@
+{# Intune / Jamf details for one device: `name` (certificate name), optional `alt` (login identity). #}
+{% set i = (mdm(name) or (mdm(alt) if alt else None)) if mdm_on else None %}
+{% if i %}
+  <div class="muted">{{ i.user or 'no user' }} · {{ i.source }}</div>
+  <div class="muted">{{ i.model }}{% if i.serial %} · {{ i.serial }}{% endif %}</div>
+  {% if i.compliance in ('noncompliant', 'unmanaged') %}<span class="pill bad">{{ i.compliance|replace("noncompliant", "non-compliant") }}</span>
+  {% elif i.compliance in ('compliant', 'managed') %}<span class="pill ok">{{ i.compliance }}</span>
+  {% elif i.compliance %}<span class="pill warn">{{ i.compliance }}</span>{% endif %}
+{% elif mdm_on and name %}
+  <span class="pill warn">not in Intune/Jamf</span>
+{% endif %}

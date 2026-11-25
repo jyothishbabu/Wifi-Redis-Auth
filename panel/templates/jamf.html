@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>1. Automatic Wi-Fi certificates for Jamf Macs (SCEP)</h2>
+  <p class="muted">One Jamf configuration profile gives every Mac its own certificate and the {{ ssid }} network, like Intune does for Windows.
+    Each Mac creates its own key (it never leaves the Mac), and Jamf renews certificates automatically.</p>
+  {% if not sc.enabled %}
+    <form method="post" action="{{ url_for('jamf_scep') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button name="action" value="on">Turn on automatic certificates for Jamf</button>
+    </form>
+  {% else %}
+    <p><span class="pill ok">on</span> {{ sc.issued }} certificate{{ '' if sc.issued == 1 else 's' }} issued so far.</p>
+    {% if not panel_trusted %}<div class="flash error">The panel's HTTPS certificate isn't signed by the Redis root, so Macs won't trust the SCEP URL.
+      Certificates page → 3 → Re-issue the panel certificate.</div>{% endif %}
+    <table class="cert">
+      <tr><th>SCEP URL</th><td class="mono">{{ sc.url }}</td></tr>
+      <tr><th>Challenge</th><td><span class="secret"><input type="password" value="" readonly data-current="{{ sc.challenge }}">
+        <button type="button" class="small secondary" data-reveal>Show current</button></span></td></tr>
+      <tr><th>CA fingerprint (SHA-1)</th><td class="mono">{{ sc.fingerprint }}</td></tr>
+      <tr><th>Root to upload</th><td><a class="button small-btn" href="{{ url_for('download_root') }}">Download Redis-Root-CA.cer</a></td></tr>
+    </table>
+    <form method="post" action="{{ url_for('jamf_scep') }}" class="filters">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button name="action" value="regenerate" class="secondary small-btn" data-confirm-click="Create a new challenge? You must paste it into the Jamf profile, or new Macs can't enroll.">New challenge</button>
+      <button name="action" value="off" class="danger small-btn">Turn off</button>
+    </form>
+
+    <h3>Create the profile in Jamf Pro (once)</h3>
+    <p class="muted">Jamf Pro → Computers → <b>Configuration Profiles</b> → New. General: name <b>Wi-Fi {{ ssid }}</b>, Level <b>Computer Level</b>, Distribution <b>Install Automatically</b>. Add three payloads:</p>
+    <table>
+      <tr><th>Payload</th><th>Settings</th></tr>
+      <tr><td><b>Certificate</b></td><td>Name <code>Redis Root CA</code> · Select Certificate Option <b>Upload</b> → <code>Redis-Root-CA.cer</code></td></tr>
+      <tr><td><b>SCEP</b></td><td>
+        URL <code>{{ sc.url }}</code> · Name <code>Redis</code><br>
+        Subject <code>CN=$SERIALNUMBER</code> · Subject Alternative Name: DNS Name <code>$SERIALNUMBER</code><br>
+        Challenge Type <b>Static</b> · Challenge: the challenge above (both fields)<br>
+        Key Size <b>2048</b> · tick <b>Use as digital signature</b> and <b>Use for key encipherment</b><br>
+        Fingerprint <code>{{ sc.fingerprint }}</code> · leave <b>Allow export from keychain</b> unticked</td></tr>
+      <tr><td><b>Network</b></td><td>
+        Network Interface <b>Wi-Fi</b> · SSID <code>{{ ssid }}</code> · tick <b>Auto Join</b> · Security Type <b>WPA2 Enterprise</b><br>
+        Protocols: accepted EAP type <b>TLS</b> · Identity Certificate: the <b>SCEP</b> payload<br>
+        Trust: tick <b>Redis Root CA</b> · Trusted Server Certificate Names <code>{{ s.server_name }}</code></td></tr>
+    </table>
+    <p class="muted">Scope: a smart group of the Macs that should use {{ ssid }} (start with 2–3 pilot Macs). Each Mac must be on an office network
+      (wired, guest Wi-Fi or a VPN leaving from an office IP) when the profile installs, because the panel only answers office IPs.
+      If a Mac was away, use <b>Redistribute</b> on the profile once it is back.</p>
+    <p class="muted">Check: the Mac shows the profile in System Settings → Device Management, connects to {{ ssid }} by itself,
+      and appears on the Logins page as ACCEPT (named after its serial number, or its Jamf name once section 2 is connected).</p>
+  {% endif %}
+</div>
+
+<form method="post" action="{{ url_for('jamf_inventory') }}" class="card form">
+  <h2>2. Jamf Pro inventory (read-only, optional)</h2>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if jamf_on %}
+    <p>{% if jstate.error %}<span class="pill bad">error</span> {{ jstate.error }}
+       {% else %}<span class="pill ok">connected</span> {{ jstate.count }} computers, refreshed {{ jstate.updated|when }} (every 15 minutes){% endif %}</p>
+  {% else %}
+    <p class="muted">Shows each Mac's Jamf name, user, model and managed state next to its Wi-Fi logins, instead of only its serial number.</p>
+  {% endif %}
+  <details {{ '' if jamf_on else 'open' }}>
+    <summary>How to get these values (5 minutes, once)</summary>
+    <ol>
+      <li>Jamf Pro → Settings → System → <b>API roles and clients</b> → <b>API Roles</b> → New: name <code>Wi-Fi panel (read)</code>, privilege <b>Read Computers</b> → Save.</li>
+      <li><b>API Clients</b> → New: name <code>Wi-Fi panel</code>, API role <code>Wi-Fi panel (read)</code>, enable it → Save → <b>Generate client secret</b>.</li>
+      <li>Copy the <b>Client ID</b> and the <b>Client secret</b> (shown once) and paste them below with your Jamf Pro URL.</li>
+    </ol>
+  </details>
+  <label>Jamf Pro URL <input name="url" value="{{ s.jamf.url if s.jamf else '' }}" placeholder="https://yourcompany.jamfcloud.com" required></label>
+  <label>Client ID <input name="client_id" value="{{ s.jamf.client_id if s.jamf else '' }}" required></label>
+  <label>Client secret {% if jamf_on %}(leave blank to keep){% endif %}
+    <input name="client_secret" type="password" autocomplete="off" {{ '' if jamf_on else 'required' }}></label>
+  <div class="filters">
+    <button>{{ 'Save and test' if jamf_on else 'Connect' }}</button>
+    {% if jamf_on %}
+      <button formaction="{{ url_for('jamf_refresh') }}" formnovalidate class="secondary">Refresh now</button>
+      <button name="action" value="disconnect" formnovalidate class="danger">Disconnect</button>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

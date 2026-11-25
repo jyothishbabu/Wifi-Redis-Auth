@@ -21,11 +21,12 @@ import time
 from functools import wraps
 
 from installers import mac_profile, windows_installer
-from intune import IntuneCache
+import scep
+from mdm import MdmCache, fetch_intune, fetch_jamf
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from flask import (Flask, Response, abort, flash, jsonify, redirect,
@@ -98,7 +99,7 @@ def gen_secret():
 # ================================================================ settings
 DEFAULTS = {"configured": False, "ssid": "", "admin": {"user": "", "hash": ""}, "offices": [],
             "extra_ips": [], "debug": False, "server_name": "redis.wifi.internal", "panel_host": "",
-            "intune": {}, "app_name": "WiFi Redis Authenticator"}
+            "intune": {}, "jamf": {}, "scep": {}, "app_name": "WiFi Redis Authenticator"}
 
 
 def get_settings():
@@ -489,20 +490,36 @@ def intune_config():
     return c if c.get("tenant_id") and c.get("client_id") and c.get("client_secret") else None
 
 
-INTUNE = IntuneCache(f"{P_DIR}/intune-cache.json", intune_config)
+def jamf_config():
+    c = get_settings().get("jamf") or {}
+    return c if c.get("url") and c.get("client_id") and c.get("client_secret") else None
+
+
+INTUNE = MdmCache(f"{P_DIR}/intune-cache-v2.json", intune_config, fetch_intune)
+JAMF = MdmCache(f"{P_DIR}/jamf-cache.json", jamf_config, fetch_jamf)
 INTUNE.start()
+JAMF.start()
+
+
+def mdm(key):
+    """Inventory record for a certificate name, device ID, serial or Windows name (Intune first, then Jamf)."""
+    return (INTUNE.lookup(key) or JAMF.lookup(key)) if key else None
+
+
+def mdm_on():
+    return INTUNE.enabled() or JAMF.enabled()
 
 
 def device_label(cert_name, eap_user=""):
     """Friendly name for a laptop: Intune device name, else the Windows computer name the laptop
     sent as its login identity (host/NAME), else the certificate name itself."""
-    i = INTUNE.lookup(cert_name)
-    if i and i.get("deviceName"):
-        return i["deviceName"]
+    i = mdm(cert_name)
+    if i and i.get("name"):
+        return i["name"]
     u = (eap_user or "").removeprefix("host/").split(".")[0]
-    if u and u.lower() != (cert_name or "").lower():
-        i = INTUNE.lookup(u)
-        return i["deviceName"] if i and i.get("deviceName") else u
+    if u and u.lower() != (cert_name or "").lower() and u.lower() != "anonymous":
+        i = mdm(u)
+        return i["name"] if i and i.get("name") else u
     return cert_name
 
 
@@ -520,6 +537,8 @@ def guard():
             return redirect(url_for("setup"))
     elif not ip_allowed(client_ip(), s):
         abort(403)
+    if request.endpoint == "scep_endpoint":
+        return
     if request.method == "POST":
         tok = request.form.get("csrf") or request.headers.get("X-CSRF", "")
         if not hmac.compare_digest(tok, session.get("csrf", "x")):
@@ -544,7 +563,7 @@ def inject():
     st = get_settings()
     return {"csrf": session["csrf"], "user": session.get("user"), "ssid": st["ssid"] or "Wi-Fi",
             "app_name": st["app_name"] or "WiFi Redis Authenticator",
-            "intune": INTUNE.lookup, "intune_on": INTUNE.enabled(), "device_label": device_label}
+            "mdm": mdm, "mdm_on": mdm_on(), "device_label": device_label}
 
 
 @app.template_filter("when")
@@ -742,13 +761,15 @@ def dashboard():
     certs = [cert_info(c) for c in server_chain()] + [cert_info(c) for _, c in trusted_cas()]
     ok_devices = {r["device"]: r["user"] for r in recent if r["result"] == "ACCEPT" and r["device"]}
     def found(d, u):
-        return INTUNE.lookup(d) or INTUNE.lookup(u or "")
-    not_in_intune = sorted(device_label(d, u) for d, u in ok_devices.items() if INTUNE.enabled() and not found(d, u))
+        return mdm(d) or mdm(u or "")
+    not_in_mdm = sorted(device_label(d, u) for d, u in ok_devices.items() if mdm_on() and not found(d, u))
     noncompliant = sorted(device_label(d, u) for d, u in ok_devices.items()
-                          if (found(d, u) or {}).get("complianceState") == "noncompliant")
+                          if (found(d, u) or {}).get("compliance") in ("noncompliant", "unmanaged"))
     return render_template(
         "dashboard.html", status=server_status(), events=rows[:15], checks=checklist(s),
-        not_in_intune=not_in_intune, noncompliant=noncompliant, intune_state=INTUNE.state(),
+        not_in_mdm=not_in_mdm, noncompliant=noncompliant,
+        mdm_errors=[f"{n}: {c.state()['error']}" for n, c in (("Intune", INTUNE), ("Jamf", JAMF))
+                    if c.enabled() and c.state().get("error")],
         accepts=sum(r["result"] == "ACCEPT" for r in recent),
         rejects=sum(r["result"] == "REJECT" for r in recent),
         devices=len({r["device"] for r in recent if r["result"] == "ACCEPT"}),
@@ -789,13 +810,12 @@ def logins_csv():
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["time_utc", "result", "device_name", "certificate_name", "mac", "office", "source_ip", "nas_id", "ssid", "ap", "reason",
-                "intune_user", "intune_model", "intune_serial", "intune_os", "intune_compliance"])
+                "mdm", "user", "model", "serial", "os", "compliance"])
     for r in filtered_rows():
-        i = INTUNE.lookup(r["device"]) or INTUNE.lookup(r["user"]) or {}
+        i = mdm(r["device"]) or mdm(r["user"]) or {}
         w.writerow([when(r["ts"]), r["result"], device_label(r["device"], r["user"]), r["device"], r["mac"], r["office"], r["src"],
-                    r["nas"], r["ssid"], r["ap"], r["reason"], i.get("userPrincipalName", ""),
-                    f"{i.get('manufacturer', '')} {i.get('model', '')}".strip(), i.get("serialNumber", ""),
-                    f"{i.get('operatingSystem', '')} {i.get('osVersion', '')}".strip(), i.get("complianceState", "")])
+                    r["nas"], r["ssid"], r["ap"], r["reason"], i.get("source", ""), i.get("upn", ""),
+                    i.get("model", ""), i.get("serial", ""), i.get("os", ""), i.get("compliance", "")])
     return Response(buf.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=wifi-logins.csv"})
 
@@ -1189,7 +1209,8 @@ def regen_panel():
 @app.route("/settings")
 @login_required
 def settings_page():
-    return render_template("settings.html", s=get_settings(), my_ip=client_ip(), istate=INTUNE.state())
+    return render_template("settings.html", s=get_settings(), my_ip=client_ip(), istate=INTUNE.state(),
+                           intune_on=INTUNE.enabled())
 
 
 @app.post("/settings/general")
@@ -1300,6 +1321,212 @@ def save_admin():
     audit("change admin account", f"user={user} password {'changed' if pw else 'unchanged'}")
     flash("Admin account updated.", "ok")
     return redirect(url_for("settings_page"))
+
+
+# ---------------------------------------------------------------- Jamf: SCEP + inventory
+def scep_ra(label):
+    """RA certificate the SCEP clients encrypt to (signed by the Device CA)."""
+    c, k = read_bytes(f"{DEVCA_DIR}/ra.pem"), read_bytes(f"{DEVCA_DIR}/ra.key")
+    if c and k:
+        return x509.load_pem_x509_certificate(c), serialization.load_pem_private_key(k, None)
+    ca_cert, ca_key = device_ca(label)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = utcnow()
+    cert = (x509.CertificateBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, label),
+                                     x509.NameAttribute(NameOID.COMMON_NAME, f"{label} SCEP RA")]))
+            .issuer_name(ca_cert.subject).public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - dt.timedelta(minutes=5)).not_valid_after(now + dt.timedelta(days=1825))
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(x509.KeyUsage(True, False, True, False, False, False, False, False, False), critical=True)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()), critical=False)
+            .sign(ca_key, hashes.SHA256()))
+    atomic_write(f"{DEVCA_DIR}/ra.key", pem_key(key), 0o600)
+    atomic_write(f"{DEVCA_DIR}/ra.pem", pem_cert(cert))
+    return cert, key
+
+
+def scep_issue(csr, ca_cert, ca_key):
+    cn = csr.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+    now = utcnow()
+    cert = (x509.CertificateBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
+            .issuer_name(ca_cert.subject).public_key(csr.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - dt.timedelta(minutes=5)).not_valid_after(now + dt.timedelta(days=CERT_DAYS))
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(x509.KeyUsage(True, False, True, False, False, False, False, False, False), critical=True)
+            .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName(cn)]), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()), critical=False)
+            .sign(ca_key, hashes.SHA256()))
+    with lock:
+        devs = get_devices()
+        dev = next((d for d in devs if d["name"].lower() == cn.lower()), None)
+        if dev is None:
+            dev = {"name": cn, "note": "Jamf (SCEP)", "created": int(time.time()), "by": "SCEP", "certs": []}
+            devs.append(dev)
+        dev.setdefault("certs", []).append({"serial": format(cert.serial_number, "x"), "issued": int(time.time()),
+                                            "expires": int(cert.not_valid_after_utc.timestamp()), "format": "scep"})
+        save_devices(devs)
+    return cert
+
+
+@app.route("/scep", methods=["GET", "POST"], endpoint="scep_endpoint")
+@app.route("/cgi-bin/pkiclient.exe", methods=["GET", "POST"], endpoint="scep_endpoint")
+def scep_endpoint():
+    s = get_settings()
+    cfg = s.get("scep") or {}
+    if not cfg.get("enabled"):
+        abort(404)
+    op = request.args.get("operation", "")
+    label = s["ssid"] or "Wi-Fi"
+    if op == "GetCACaps":
+        return Response(scep.CAPS, mimetype="text/plain")
+    if op == "GetCACert":
+        ra_cert, _ = scep_ra(label)
+        ca_cert, _ = device_ca(label)
+        return Response(scep.degenerate([ra_cert, ca_cert]), mimetype="application/x-x509-ca-ra-cert")
+    if op != "PKIOperation":
+        abort(400)
+    if throttled(client_ip()):
+        abort(429)
+    if request.method == "POST":
+        der = request.get_data()
+    else:
+        import base64
+        der = base64.b64decode(request.args.get("message", ""))
+    ra_cert, ra_key = scep_ra(label)
+    ca_cert, ca_key = device_ca(label)
+    blocked = {b["name"].lower() for b in get_blocked()}
+
+    def check(mtype, csr, challenge, signer):
+        cn = csr.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        cn = cn[0].value if cn else ""
+        if not DEVICE_RE.match(cn):
+            raise scep.ScepError(f"subject CN '{cn}' is not a valid device name (use $SERIALNUMBER)")
+        if cn.lower() in blocked:
+            raise scep.ScepError(f"{cn} is blocked")
+        renewal_ok = False
+        # Renewal (RFC 8894): the request is signed with a still-valid certificate we issued for the same name.
+        if signer.issuer == ca_cert.subject:
+            try:
+                ca_cert.public_key().verify(signer.signature, signer.tbs_certificate_bytes, padding.PKCS1v15(),
+                                            signer.signature_hash_algorithm)
+                cur = signer.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+                renewal_ok = (signer.not_valid_after_utc > utcnow()) and cur and cur[0].value.lower() == cn.lower()
+            except Exception:
+                renewal_ok = False
+        if not renewal_ok and not hmac.compare_digest(challenge or "", cfg.get("challenge", "")):
+            record_fail(client_ip())
+            raise scep.ScepError("wrong challenge password")
+
+    try:
+        resp, info = scep.pki_operation(der, ra_cert, ra_key, ca_cert, ca_key, check,
+                                        lambda csr: scep_issue(csr, ca_cert, ca_key))
+    except ValueError:
+        abort(400)
+    detail = f"{info.get('cn', '?')} {info.get('status')} {info.get('reason', '')}".strip()
+    with open(AUDIT, "a") as f:
+        f.write(f"{int(time.time())}\t(SCEP)\t{client_ip()}\tcertificate request\t{detail}\n")
+    return Response(resp, mimetype="application/x-pki-message")
+
+
+def scep_view():
+    s = get_settings()
+    cfg = s.get("scep") or {}
+    out = {"enabled": bool(cfg.get("enabled")), "challenge": cfg.get("challenge", ""),
+           "url": f"https://{s['panel_host'] or request.host.rsplit(':', 1)[0]}:8443/scep"}
+    if out["enabled"]:
+        ca_cert, _ = device_ca(s["ssid"] or "Wi-Fi")
+        out["fingerprint"] = ca_cert.fingerprint(hashes.SHA1()).hex().upper()
+        out["ca_subject"] = ca_cert.subject.rfc4514_string()
+    out["issued"] = sum(1 for d in get_devices() for c in d.get("certs", []) if c.get("format") == "scep")
+    return out
+
+
+@app.route("/jamf")
+@login_required
+def jamf_page():
+    chain = server_chain()
+    panel = parse_certs(read_bytes(f"{TLS_DIR}/panel.pem") or b"")
+    panel_trusted = bool(panel and len(chain) > 1 and panel[0].issuer == chain[-1].subject)
+    return render_template("jamf.html", s=get_settings(), sc=scep_view(), jstate=JAMF.state(), jamf_on=JAMF.enabled(),
+                           root=cert_info(chain[-1]) if len(chain) > 1 else None, panel_trusted=panel_trusted)
+
+
+@app.post("/jamf/scep")
+@login_required
+def jamf_scep():
+    action = request.form.get("action")
+    with lock:
+        s = get_settings()
+        cfg = s.get("scep") or {}
+        if action == "on":
+            label = s["ssid"] or "Wi-Fi"
+            device_ca(label)
+            scep_ra(label)
+            cfg.update(enabled=True, challenge=cfg.get("challenge") or secrets.token_urlsafe(24))
+            msg = "Automatic certificates for Jamf are on. Now create the Jamf configuration profile below."
+        elif action == "regenerate":
+            cfg["challenge"] = secrets.token_urlsafe(24)
+            msg = "New challenge created. Update it in the Jamf profile's SCEP payload, or new Macs can't enroll."
+        elif action == "off":
+            cfg["enabled"] = False
+            msg = "SCEP turned off. Existing Mac certificates keep working; new Macs can't enroll."
+        else:
+            abort(400)
+        s["scep"] = cfg
+        save_settings(s)
+        apply_config("scep")
+    audit(f"jamf scep {action}")
+    flash(msg, "ok")
+    return redirect(url_for("jamf_page"))
+
+
+@app.post("/jamf/inventory")
+@login_required
+def jamf_inventory():
+    if request.form.get("action") == "disconnect":
+        with lock:
+            s = get_settings()
+            s["jamf"] = {}
+            save_settings(s)
+        audit("jamf disconnected")
+        flash("Jamf connection removed.", "ok")
+        return redirect(url_for("jamf_page"))
+    url = request.form.get("url", "").strip().rstrip("/")
+    client = request.form.get("client_id", "").strip()
+    secret = request.form.get("client_secret", "").strip() or (get_settings().get("jamf") or {}).get("client_secret", "")
+    errors = []
+    if not re.match(r"^https://[A-Za-z0-9.-]+(:\d+)?(/[A-Za-z0-9._-]+)*$", url) and not os.environ.get("JAMF_ALLOW_HTTP"):
+        errors.append("Jamf Pro URL: like https://yourcompany.jamfcloud.com")
+    if not client or len(client) > 100:
+        errors.append("Client ID: from Jamf Pro → Settings → API roles and clients.")
+    if not secret or len(secret) > 256 or any(ch in secret for ch in "\r\n"):
+        errors.append("Client secret: generated for that API client.")
+    if errors:
+        for e in errors:
+            flash(e, "error")
+        return redirect(url_for("jamf_page"))
+    with lock:
+        s = get_settings()
+        s["jamf"] = {"url": url, "client_id": client, "client_secret": secret}
+        save_settings(s)
+    ok = JAMF.refresh()
+    st = JAMF.state()
+    audit("jamf connected" if ok else "jamf connection failed", url)
+    flash(f"Connected to Jamf: {st['count']} computers found." if ok else f"Saved, but Jamf said: {st['error']}",
+          "ok" if ok else "error")
+    return redirect(url_for("jamf_page"))
+
+
+@app.post("/jamf/inventory/refresh")
+@login_required
+def jamf_refresh():
+    ok = JAMF.refresh()
+    st = JAMF.state()
+    flash(f"Jamf refreshed: {st['count']} computers." if ok else f"Jamf said: {st['error']}", "ok" if ok else "error")
+    return redirect(url_for("jamf_page"))
 
 
 # ---------------------------------------------------------------- configuration view

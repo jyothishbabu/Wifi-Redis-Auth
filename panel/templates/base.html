@@ -11,7 +11,7 @@
 <header>
   <strong class="brand">{{ app_name }}</strong>
   <nav>
-    {% for ep, label in [('dashboard','Dashboard'),('logins','Logins'),('devices','Devices'),('offices','Offices'),('certificates','Certificates'),('settings_page','Settings'),('config','Logs & config')] %}
+    {% for ep, label in [('dashboard','Dashboard'),('logins','Logins'),('devices','Devices'),('offices','Offices'),('certificates','Certificates'),('jamf_page','Jamf'),('settings_page','Settings'),('config','Logs & config')] %}
     <a href="{{ url_for(ep) }}" class="{{ 'active' if request.endpoint == ep }}">{{ label }}</a>
     {% endfor %}
   </nav>

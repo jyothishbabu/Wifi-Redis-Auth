@@ -6,7 +6,7 @@
   <td><span class="pill {{ 'ok' if r.result == 'ACCEPT' else 'bad' }}">{{ r.result }}</span></td>
   {% set label = device_label(r.device, r.user) %}
   <td><b>{{ label or '-' }}</b>{% if label != r.device %}<div class="muted mono small-id">{{ r.device }}</div>{% endif %}
-    {% with name = r.device, alt = r.user %}{% include "_intune.html" %}{% endwith %}</td>
+    {% with name = r.device, alt = r.user %}{% include "_mdm.html" %}{% endwith %}</td>
   <td class="mono">{{ r.mac or '-' }}</td>
   <td>{{ r.office or '-' }}<div class="muted mono">{{ r.src }}</div></td>
   <td>{{ r.ap or '-' }}<div class="muted">{{ r.nas }}</div></td>
